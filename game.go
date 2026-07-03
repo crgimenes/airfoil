@@ -193,6 +193,7 @@ type Game struct {
 	animTime    float64
 	animPlaying bool // timeline running; when false the surfaces hold their pose
 	sceneErr    string
+	simErr      string
 
 	// Editor mode: a second view of the same scene (toggled with E). The
 	// simulation is frozen while editing.
@@ -544,6 +545,10 @@ func (g *Game) Update() error {
 	for range substeps {
 		g.sim.Step()
 	}
+	if !solverFinite(g.sim) {
+		g.resetFlowAfterInstability()
+		return nil
+	}
 	g.smoke.Step(g.sim, tracerSpeed)
 	const a = 0.04 // EMA smoothing for the displayed forces
 	g.fxEMA += a * (g.sim.Fx - g.fxEMA)
@@ -564,6 +569,34 @@ func (g *Game) Update() error {
 		g.clSeen[bin] = true
 	}
 	return nil
+}
+
+func (g *Game) resetFlowAfterInstability() {
+	g.applyBody(true)
+	g.smoke = viz.NewParticles(nParticles, gridW, gridH, 1)
+	g.fxEMA = 0
+	g.fyEMA = 0
+	g.mzEMA = 0
+	g.sepEMA = 0
+	g.clCur = 0
+	g.cdCur = 0
+	g.simErr = "simulation reset after numerical instability"
+}
+
+func solverFinite(s *lbm.Solver) bool {
+	if !finite(s.Fx) || !finite(s.Fy) || !finite(s.Mz) || !finite(s.Sep) {
+		return false
+	}
+	for c := range s.Rho {
+		if !finite(s.Rho[c]) || !finite(s.Ux[c]) || !finite(s.Uy[c]) {
+			return false
+		}
+	}
+	return true
+}
+
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
 }
 
 // resetCurve clears the lift curve; the polar is specific to one profile.
@@ -830,6 +863,7 @@ func (g *Game) saveSceneAs() {
 // (without resetting the flow); in scene mode the angle is applied as a global
 // rotation each frame, so nothing else is needed here.
 func (g *Game) setAlpha(deg float64) {
+	g.simErr = ""
 	g.alphaDeg = math.Max(-aoaLimit, math.Min(aoaLimit, deg))
 	if g.scn == nil {
 		g.applyBody(false)
@@ -842,6 +876,7 @@ func (g *Game) setAlpha(deg float64) {
 
 // setSpeed changes the free-stream speed in place (no reset).
 func (g *Game) setSpeed(u float64) {
+	g.simErr = ""
 	g.u0 = math.Max(0.02, math.Min(0.15, u))
 	g.sim.SetInletSpeed(g.u0)
 }
@@ -1262,6 +1297,9 @@ func (g *Game) drawSidePanel(screen *ebiten.Image) {
 		y = g.row(screen, "CG (aero center)", fmt.Sprintf("%.0f%% chord", pivotFrac*100), x, y)
 	}
 
+	if g.simErr != "" {
+		y = g.row(screen, "Status", g.simErr, x, y)
+	}
 	if g.sceneErr != "" {
 		y = g.row(screen, "Scene error", g.sceneErr, x, y)
 	}
