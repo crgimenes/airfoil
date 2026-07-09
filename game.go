@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -460,6 +461,7 @@ func (g *Game) menuItems() []menu.Item {
 		}},
 		{Title: "File", Submenu: []menu.Item{
 			{Title: "Open…", Shortcut: "cmd+o", OnClick: act(g.openSceneDialog)},
+			{Title: "Import SVG…", OnClick: act(g.importSVGDialog)},
 			{Separator: true},
 			{Title: "Save", Shortcut: "cmd+s", OnClick: act(g.saveScene)},
 			{Title: "Save As…", Shortcut: "cmd+shift+s", OnClick: act(g.saveSceneAs)},
@@ -491,18 +493,28 @@ func (g *Game) menuSignature() string {
 // syncMenu rebuilds the native menu on the main thread when the context changed.
 func (g *Game) syncMenu() {
 	sig := g.menuSignature()
-	if sig != g.menuSig {
-		items := g.menuItems()
-		ebiten.RunOnMainThread(func() {
-			_, _ = menu.Set(items, menu.Options{}) // unsupported platforms no-op
-		})
-		g.menuSig = sig
+	if sig == g.menuSig {
+		return
 	}
+	items := g.menuItems()
+	// Windows attaches the menu bar to the window handle; macOS ignores it.
+	// Menu clicks are marshaled onto the game goroutine by act(), so no
+	// Dispatch is needed on any platform.
+	hwnd := mainWindowHandle()
+	var err error
+	ebiten.RunOnMainThread(func() {
+		_, err = menu.Set(items, menu.Options{Window: hwnd})
+	})
+	if err != nil && hwnd == nil && runtime.GOOS == "windows" {
+		return // the window is not up yet; retry next frame with a real handle
+	}
+	g.menuSig = sig // set, or unsupported here (Linux): either way, done
 }
 
 func (g *Game) Update() error {
 	g.syncMenu()
 	g.drainPending()
+	g.handleDroppedFiles()
 	if g.quit {
 		return ebiten.Termination
 	}
@@ -746,6 +758,7 @@ func (g *Game) openSceneDialog() {
 		})
 	})
 	if path == "" {
+		g.noDialogHint()
 		return // cancelled, or unsupported platform
 	}
 	src, err := os.ReadFile(path) // #nosec G304 -- path chosen by the user via the native dialog

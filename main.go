@@ -9,9 +9,13 @@ import (
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// windowTitle names the app window; the Windows menu backend also uses it to
+// locate the window handle, so it must stay unique to this process.
+const windowTitle = "kutta — 2D wind tunnel"
+
 func main() {
 	ebiten.SetWindowSize(winW, winH)
-	ebiten.SetWindowTitle("kutta — 2D wind tunnel")
+	ebiten.SetWindowTitle(windowTitle)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	setWindowIcon()
 	err := ebiten.RunGame(NewGame())

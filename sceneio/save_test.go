@@ -116,7 +116,9 @@ func TestDATSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := `(scene (object "wing" (dat "` + path + `" 100 10 50)) (loop 0))`
+	// Forward slashes keep the path valid inside a Filo string on Windows,
+	// where the native separator would read as escape sequences.
+	src := `(scene (object "wing" (dat "` + filepath.ToSlash(path) + `" 100 10 50)) (loop 0))`
 	s, err := Load(src)
 	if err != nil {
 		t.Fatal(err)

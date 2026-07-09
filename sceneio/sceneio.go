@@ -53,6 +53,7 @@ func Load(src string) (*scene.Scene, error) {
 		"point":   biPoint,
 		"naca":    biNACA,
 		"dat":     biDAT,
+		"svg":     biSVG,
 		"shape":   biTagged("shape"),
 		"handles": biTagged("handles"),
 		"gaps":    biTagged("gaps"),
@@ -163,6 +164,41 @@ func biDAT(_ context.Context, args []filo.Value) (filo.Value, error) {
 		return filo.Value{}, err
 	}
 	placed := foil.Place(outline, nums[0], nums[1], nums[2], 0, 0)
+	return shapeValue(placed), nil
+}
+
+// biSVG builds a shape from (svg "path" chord leadX leadY [index]): an outline
+// imported from an SVG file, scaled to chord cells with its left edge at
+// (leadX, leadY). A drawing with several subpaths yields several outlines,
+// normalized together; index (default 0) picks one, and giving each object the
+// same placement arguments keeps their drawn relative positions.
+func biSVG(_ context.Context, args []filo.Value) (filo.Value, error) {
+	if len(args) < 4 || len(args) > 5 {
+		return filo.Value{}, fmt.Errorf("svg: want (svg \"path\" chord leadX leadY [index])")
+	}
+	if args[0].Kind != filo.KString {
+		return filo.Value{}, fmt.Errorf("svg: path must be a string")
+	}
+	nums, err := numbers(args[1:])
+	if err != nil {
+		return filo.Value{}, fmt.Errorf("svg: %w", err)
+	}
+	data, err := os.ReadFile(args[0].Str) // #nosec G304 -- path comes from the scene file the user opened
+	if err != nil {
+		return filo.Value{}, fmt.Errorf("svg: %w", err)
+	}
+	outlines, err := foil.ParseSVG(data)
+	if err != nil {
+		return filo.Value{}, err
+	}
+	idx := 0
+	if len(nums) > 3 {
+		idx = int(nums[3])
+	}
+	if idx < 0 || idx >= len(outlines) {
+		return filo.Value{}, fmt.Errorf("svg: subpath index %d out of range (drawing has %d)", idx, len(outlines))
+	}
+	placed := foil.Place(outlines[idx], nums[0], nums[1], nums[2], 0, 0)
 	return shapeValue(placed), nil
 }
 

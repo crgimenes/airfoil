@@ -1,0 +1,9 @@
+; A non-airfoil body imported from an SVG drawing: a car silhouette with two
+; wheels. Each object picks one subpath of the same drawing; sharing the
+; placement arguments (chord leadX leadY) keeps their drawn positions.
+; Run from the repo root so the relative path resolves.
+(scene
+  (object "body" (svg "examples/car.svg" 140 90 100))
+  (object "wheel-front" (svg "examples/car.svg" 140 90 100 1))
+  (object "wheel-rear" (svg "examples/car.svg" 140 90 100 2))
+  (loop 0))
