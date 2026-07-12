@@ -432,6 +432,7 @@ func (g *Game) menuItems() []menu.Item {
 		{Title: "Copy Object", Disabled: !inGeom || g.selObj < 0, OnClick: act(g.copyObject)},
 		{Title: "Paste Object", Disabled: !inGeom || g.objClip == nil, OnClick: act(g.pasteObject)},
 		{Title: "Cut Object", Disabled: !inGeom || g.selObj < 0, OnClick: act(g.cutObject)},
+		{Title: "Merge with Clipboard", Disabled: !inGeom || g.selObj < 0 || g.objClip == nil, OnClick: act(g.mergeWithClipboard)},
 	}
 
 	foilItems := make([]menu.Item, 0, len(profiles)+2)
