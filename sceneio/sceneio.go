@@ -21,7 +21,8 @@
 // handles gives each shape point a symmetric Bezier tangent (zero = corner); a
 // legacy (curved) element is still accepted and migrated to smooth handles.
 // gaps lists cut edge indices (a broken outline, not a solid); a legacy (open)
-// element maps to a single gap at the wrap edge.
+// element maps to a single gap at the wrap edge. control, when present, marks
+// the object as host-driven (e.g. by a UI slider) instead of its keyframes.
 package sceneio
 
 import (
@@ -59,6 +60,7 @@ func Load(src string) (*scene.Scene, error) {
 		"gaps":    biTagged("gaps"),
 		"open":    biTagged("open"),
 		"curved":  biTagged("curved"),
+		"control": biTagged("control"),
 		"pivot":   biTagged("pivot"),
 		"pose":    biTagged("pose"),
 		"key":     biTagged("key"),
@@ -380,6 +382,8 @@ func decodeObject(items []filo.Value) (*scene.Object, error) {
 			legacyOpen = true // legacy single break at the wrap edge
 		case "curved":
 			autoSmooth = true // legacy flag: derive smooth tangents below
+		case "control":
+			obj.Control = true
 		default:
 			return nil, fmt.Errorf("object %q: unknown element %q", obj.Name, tag)
 		}

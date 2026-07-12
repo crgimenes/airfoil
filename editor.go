@@ -1329,8 +1329,29 @@ func (g *Game) runSidePanel() {
 	if g.selObj >= 0 && g.selObj < len(g.scn.Objects) {
 		g.side.Label("name")
 		g.side.TextField("obj.name", &g.scn.Objects[g.selObj].Name)
+		o := g.scn.Objects[g.selObj]
+		if g.side.Toggle("obj.control", "Control Surface", o.Control) {
+			g.setControlObject(o, !o.Control)
+		}
 	}
 	g.side.End()
+}
+
+// setControlObject sets whether o is the scene's single live-controlled
+// object, clearing the flag on every other object so at most one is active,
+// and zeroing the simulator's control slider so a stale deflection from a
+// previous control object doesn't carry over.
+func (g *Game) setControlObject(o *scene.Object, on bool) {
+	o.Control = on
+	if !on {
+		return
+	}
+	for _, other := range g.scn.Objects {
+		if other != o {
+			other.Control = false
+		}
+	}
+	g.controlDeg = 0
 }
 
 // editorOpen loads a scene through the native dialog and frames it for editing.

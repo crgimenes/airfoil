@@ -65,6 +65,10 @@ const (
 	clPlotMin = -2.0 // Cl axis range of the plot
 	clPlotMax = 2.0
 
+	// controlLimit is the full deflection range of the live control-surface
+	// slider, in degrees either way.
+	controlLimit = 40
+
 	// Stall indicator thresholds on the surface separation fraction (lbm.Sep).
 	// Calibrated on the default NACA 2412 at this grid/Re by an AoA sweep:
 	// separation begins ~6 deg and grows to ~0.30 near 14 deg. This grid's low
@@ -90,9 +94,11 @@ const (
 	simW    = gridW * pixScale
 	simH    = gridH * pixScale
 	sidePnW = 300
-	botPnH  = 156
-	winW    = simW + sidePnW
-	winH    = simH + botPnH
+	// botPnH is tall enough for the controls list plus three slider rows (speed,
+	// AoA, and the optional control-surface slider) in the bottom-right corner.
+	botPnH = 210
+	winW   = simW + sidePnW
+	winH   = simH + botPnH
 )
 
 // UI palette.
@@ -141,6 +147,7 @@ type Game struct {
 	nacaInput   string  // NACA code being typed in the toolbar field
 	alphaDeg    float64 // angle of attack in degrees
 	u0          float64
+	controlDeg  float64 // live deflection of the scene's Control object, in degrees
 	mode        fieldMode
 	paused      bool
 	streamlines bool // overlay integrated streamlines
@@ -368,9 +375,44 @@ func (g *Game) sceneMask(t float64) []bool {
 		if o.Broken() {
 			continue // a cut outline is not a solid until it is closed
 		}
-		foil.RasterizeInto(mask, g.sceneGlobal(o.PolygonAt(t)), gridW, gridH)
+		foil.RasterizeInto(mask, g.sceneGlobal(g.objectPolygon(o, t)), gridW, gridH)
 	}
 	return mask
+}
+
+// objectPolygon resolves an object's posed outline: the live control-surface
+// deflection when the object is marked Control (ignoring its keyframe track
+// entirely), or its normal keyframed pose at t otherwise. The editor's own
+// preview is unaffected by this -- Control only changes simulator playback.
+func (g *Game) objectPolygon(o *scene.Object, t float64) []foil.Point {
+	if o.Control {
+		return scene.Apply(o.Outline(), o.Pivot, scene.Pose{Rot: g.controlDeg, Scale: 1})
+	}
+	return o.PolygonAt(t)
+}
+
+// controlObject returns the scene's live-controlled object (the one Control
+// marks), or nil if none is marked.
+func (g *Game) controlObject() *scene.Object {
+	if g.scn == nil {
+		return nil
+	}
+	for _, o := range g.scn.Objects {
+		if o.Control {
+			return o
+		}
+	}
+	return nil
+}
+
+// setControl changes the live control-surface deflection in place (no reset),
+// re-applying immediately so it moves even while the timeline is paused.
+func (g *Game) setControl(deg float64) {
+	g.controlDeg = math.Max(-controlLimit, math.Min(controlLimit, deg))
+	if g.scn == nil {
+		return
+	}
+	g.sim.UpdateSolid(g.sceneMask(g.scn.LoopTime(g.animTime)))
 }
 
 // Update steps the simulation and handles input.
@@ -733,13 +775,19 @@ func (g *Game) handleInput() {
 // while the knob moves.
 func (g *Game) runSliders() {
 	g.sliders.Begin(ui.InputFromEbiten(), simW+16, simH+30)
+	g.sliders.Label(fmt.Sprintf("Inlet speed %25.2f", g.u0))
+	if g.sliders.Slider("spd", &g.u0, spdMin, spdMax) {
+		g.setSpeed(g.u0)
+	}
 	g.sliders.Label(fmt.Sprintf("Angle of attack %17.1f deg", g.alphaDeg))
 	if g.sliders.Slider("aoa", &g.alphaDeg, -aoaLimit, aoaLimit) {
 		g.setAlpha(g.alphaDeg)
 	}
-	g.sliders.Label(fmt.Sprintf("Inlet speed %25.2f", g.u0))
-	if g.sliders.Slider("spd", &g.u0, spdMin, spdMax) {
-		g.setSpeed(g.u0)
+	if g.controlObject() != nil {
+		g.sliders.Label(fmt.Sprintf("Control surface %14.1f deg", g.controlDeg))
+		if g.sliders.Slider("ctrl", &g.controlDeg, -controlLimit, controlLimit) {
+			g.setControl(g.controlDeg)
+		}
 	}
 	g.sliders.End()
 }
@@ -783,6 +831,7 @@ func (g *Game) setScene(sc *scene.Scene, path string) {
 	g.savePath = ""
 	g.animTime = 0
 	g.animPlaying = false
+	g.controlDeg = 0
 	g.sceneErr = ""
 	g.simErr = ""
 	g.resetCurve()
@@ -1047,7 +1096,7 @@ func (g *Game) drawOutline(dst *ebiten.Image) {
 	if g.scn != nil {
 		t := g.scn.LoopTime(g.animTime)
 		for _, o := range g.scn.Objects {
-			strokeClosed(dst, g.sceneGlobal(o.PolygonAt(t)), col)
+			strokeClosed(dst, g.sceneGlobal(g.objectPolygon(o, t)), col)
 		}
 		return
 	}
