@@ -225,6 +225,9 @@ func (g *Game) editorInput() {
 	if g.editMode == emAnimate && g.handleScrub(fmx, fmy) {
 		return
 	}
+	if g.handleReferenceInput(fmx, fmy, inCanvas) {
+		return
+	}
 
 	_, dy := ebiten.Wheel()
 	if dy != 0 && inCanvas {
@@ -1254,6 +1257,26 @@ func (g *Game) runToolbar() {
 	if g.gui.Toggle("tb.snap", "Snap", g.snapOn) {
 		g.snapOn = !g.snapOn
 	}
+	g.gui.SameLine()
+	if g.gui.Button("tb.ref", "Reference…") {
+		g.loadReferenceImage()
+	}
+	if g.ref != nil {
+		g.gui.SameLine()
+		if g.gui.Toggle("tb.refpos", "Position Ref", g.refPosMode) {
+			g.refPosMode = !g.refPosMode
+		}
+		g.gui.SameLine()
+		if g.gui.Toggle("tb.refshow", "Show Ref", g.ref.visible) {
+			g.ref.visible = !g.ref.visible
+		}
+		g.gui.SameLine()
+		g.gui.Slider("tb.refop", &g.ref.opacity, 0, 1)
+		g.gui.SameLine()
+		if g.gui.Button("tb.refclear", "Clear Ref") {
+			g.clearReference()
+		}
+	}
 	g.gui.End()
 }
 
@@ -1443,6 +1466,7 @@ func (g *Game) drawEditor(screen *ebiten.Image) {
 	vp := screen.SubImage(image.Rect(0, 0, simW, simH)).(*ebiten.Image)
 	vp.Fill(colEditBg)
 	g.drawEditGrid(vp)
+	g.drawReference(vp)
 
 	for i, o := range g.scn.Objects {
 		col := colObj
@@ -1663,6 +1687,9 @@ func (g *Game) drawEditorPanels(screen *ebiten.Image) {
 	y = g.header(screen, "EDITOR", x, y)
 	y = g.row(screen, "Source", filepath.Base(g.scenePath), x, y)
 	y = g.row(screen, "Objects", fmt.Sprintf("%d", len(g.scn.Objects)), x, y)
+	if g.sceneErr != "" {
+		y = g.row(screen, "Scene error", g.sceneErr, x, y)
+	}
 
 	mode := "GEOMETRY"
 	if g.editMode == emAnimate {
@@ -1687,6 +1714,11 @@ func (g *Game) drawEditorPanels(screen *ebiten.Image) {
 	if g.drawing {
 		drawString(screen, fmt.Sprintf("PEN  %d points   click: corner   click+drag: curve   click the green box (or Enter): close", len(g.draftPts)), 16, top+44, colObjSel)
 		drawString(screen, "Esc: cancel   wheel: zoom", 16, top+64, colLabel)
+		return
+	}
+	if g.refPosMode && g.ref != nil {
+		drawString(screen, "REFERENCE  drag: move   wheel: scale about cursor", 16, top+44, colObjSel)
+		drawString(screen, "toggle Position Ref off (toolbar) to resume editing", 16, top+64, colLabel)
 		return
 	}
 	if g.editMode == emAnimate {
