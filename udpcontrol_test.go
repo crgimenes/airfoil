@@ -6,17 +6,16 @@ func TestParseControlMessage(t *testing.T) {
 	cases := []struct {
 		line    string
 		channel string
-		value   float64
+		value   string
 		wantOK  bool
 	}{
-		{"AOA 12.5", "AOA", 12.5, true},
-		{"spd 0.08", "SPD", 0.08, true},
-		{"ctrl -20", "CTRL", -20, true},
-		{"  aoa   4  ", "AOA", 4, true},
-		{"AOA", "", 0, false},
-		{"AOA 12.5 extra", "", 0, false},
-		{"AOA notanumber", "", 0, false},
-		{"", "", 0, false},
+		{"AOA 12.5", "AOA", "12.5", true},
+		{"spd 0.08", "SPD", "0.08", true},
+		{"mode vorticity", "MODE", "vorticity", true},
+		{"  aoa   4  ", "AOA", "4", true},
+		{"AOA", "", "", false},
+		{"AOA 12.5 extra", "", "", false},
+		{"", "", "", false},
 	}
 	for _, c := range cases {
 		channel, value, ok := parseControlMessage(c.line)
@@ -28,7 +27,46 @@ func TestParseControlMessage(t *testing.T) {
 			continue
 		}
 		if channel != c.channel || value != c.value {
-			t.Errorf("parseControlMessage(%q) = (%q, %v), want (%q, %v)", c.line, channel, value, c.channel, c.value)
+			t.Errorf("parseControlMessage(%q) = (%q, %q), want (%q, %q)", c.line, channel, value, c.channel, c.value)
 		}
+	}
+}
+
+// TestApplyControlMessageTogglesAndMode exercises the channels that don't
+// need a real solver (GLOW, STREAMLINES, MODE), applying the message and then
+// draining the enqueued closure exactly like Update() does each frame.
+func TestApplyControlMessageTogglesAndMode(t *testing.T) {
+	g := &Game{}
+
+	g.applyControlMessage("GLOW 1")
+	g.drainPending()
+	if !g.glow {
+		t.Error("GLOW 1 should turn glow on")
+	}
+
+	g.applyControlMessage("GLOW 0")
+	g.drainPending()
+	if g.glow {
+		t.Error("GLOW 0 should turn glow off")
+	}
+
+	g.applyControlMessage("STREAMLINES 1")
+	g.drainPending()
+	if !g.streamlines {
+		t.Error("STREAMLINES 1 should turn streamlines on")
+	}
+
+	g.applyControlMessage("MODE pressure")
+	g.drainPending()
+	if g.mode != modePressure {
+		t.Errorf("mode = %v, want modePressure", g.mode)
+	}
+
+	// A bad value for a channel should be logged and ignored, not panic or
+	// leave a stale enqueued closure.
+	g.applyControlMessage("MODE sideways")
+	g.drainPending()
+	if g.mode != modePressure {
+		t.Errorf("invalid MODE value should be ignored; mode = %v, want unchanged modePressure", g.mode)
 	}
 }
