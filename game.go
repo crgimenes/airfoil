@@ -647,6 +647,20 @@ func fieldName(m fieldMode) string {
 	}
 }
 
+// parseFieldMode maps a case-insensitive name to a fieldMode, matching the
+// labels the View menu and toolbar button already use (fieldName's inverse).
+func parseFieldMode(s string) (fieldMode, bool) {
+	switch strings.ToLower(s) {
+	case "speed":
+		return modeSpeed, true
+	case "vorticity":
+		return modeVorticity, true
+	case "pressure":
+		return modePressure, true
+	}
+	return 0, false
+}
+
 // runSimToolbar drives the simulator's clickable toolbar (minigui) over the
 // flow's top-left: edit, file actions, the field-mode cycle and pause. The
 // hotkeys keep working alongside it.
