@@ -32,6 +32,27 @@ func TestParseControlMessage(t *testing.T) {
 	}
 }
 
+func TestIsMulticastAddr(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{":9000", false},
+		{"192.168.1.50:9000", false},
+		{"0.0.0.0:9000", false},
+		{"224.0.0.1:9000", true},   // IPv4 multicast, low end of 224.0.0.0/4
+		{"239.255.0.1:1234", true}, // IPv4 multicast, admin-scoped range
+		{"[ff02::1]:9000", true},   // IPv6 multicast
+		{"not-an-addr", false},
+	}
+	for _, c := range cases {
+		got := isMulticastAddr(c.addr)
+		if got != c.want {
+			t.Errorf("isMulticastAddr(%q) = %v, want %v", c.addr, got, c.want)
+		}
+	}
+}
+
 // TestApplyControlMessageTogglesAndMode exercises the channels that don't
 // need a real solver (GLOW, STREAMLINES, MODE), applying the message and then
 // draining the enqueued closure exactly like Update() does each frame.

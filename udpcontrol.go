@@ -8,26 +8,57 @@ import (
 	"strings"
 )
 
-// startUDPControl opens a UDP listener at addr (e.g. ":9000") and applies
-// incoming slider/display commands as they arrive, for driving kutta from
-// external hardware -- e.g. an ESP32 with rotary encoders and switches. UDP
-// is the only one of the common options (WebSockets, UDP, MQTT) that needs no
-// new dependency and no broker process, matching this project's
+// startUDPControl opens a UDP listener at addr and applies incoming
+// slider/display commands as they arrive, for driving kutta from external
+// hardware -- e.g. an ESP32 with rotary encoders and switches. UDP is the
+// only one of the common options (WebSockets, UDP, MQTT) that needs no new
+// dependency and no broker process, matching this project's
 // single-executable, family-stack rule. Nothing is sent back; this is
 // receive-only.
+//
+// addr is a plain unicast listen (":9000" for all interfaces, "1.2.3.4:9000"
+// for one) or a multicast group address ("224.0.0.1:9000"), chosen
+// automatically by whether the host parses as a multicast IP.
 //
 // Channels: AOA and SPD (angle of attack, inlet speed, both numeric), GLOW
 // and STREAMLINES (0 or 1), and MODE (speed, vorticity, or pressure). A
 // control-surface channel is a natural follow-up once there's a live
 // control-surface slider for it to drive.
 func (g *Game) startUDPControl(addr string) error {
-	conn, err := net.ListenPacket("udp", addr)
+	conn, err := listenUDPControl(addr)
 	if err != nil {
 		return err
 	}
 	log.Printf("kutta: UDP control listening on %s", conn.LocalAddr())
 	go g.udpControlLoop(conn)
 	return nil
+}
+
+// listenUDPControl opens addr for receiving: a multicast group join if the
+// host is a multicast IP, a plain unicast/wildcard listen otherwise. Both
+// return a net.PacketConn, so the caller (and udpControlLoop) don't need to
+// care which one they got.
+func listenUDPControl(addr string) (net.PacketConn, error) {
+	if isMulticastAddr(addr) {
+		gaddr, err := net.ResolveUDPAddr("udp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return net.ListenMulticastUDP("udp", nil, gaddr) // nil: let the OS pick the interface
+	}
+	return net.ListenPacket("udp", addr)
+}
+
+// isMulticastAddr reports whether addr's host is a multicast IP (224.0.0.0/4
+// for IPv4, ff00::/8 for IPv6 -- net.IP.IsMulticast covers both), so -udp can
+// switch between a plain listen and a multicast join automatically.
+func isMulticastAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsMulticast()
 }
 
 // udpControlLoop reads packets until the socket errors (typically only on
