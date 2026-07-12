@@ -744,6 +744,23 @@ func (g *Game) runSliders() {
 	g.sliders.End()
 }
 
+// loadSceneFile loads path (e.g. the -scene startup flag) exactly as if it
+// had been chosen through the Open dialog, so Save afterward writes back to
+// the same file.
+func (g *Game) loadSceneFile(path string) error {
+	src, err := os.ReadFile(path) // #nosec G304 -- path comes from a command-line flag the user supplied
+	if err != nil {
+		return err
+	}
+	sc, err := sceneio.Load(string(src))
+	if err != nil {
+		return err
+	}
+	g.setScene(sc, path)
+	g.savePath = path
+	return nil
+}
+
 // openSceneDialog asks the OS for a scene file and loads it (paused at the
 // start). A cancel or a load error leaves the current state unchanged.
 func (g *Game) openSceneDialog() {
