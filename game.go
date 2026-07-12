@@ -187,6 +187,14 @@ type Game struct {
 	dragLastX, dragLastY   float64
 	dragMoved              bool
 
+	// Trace reference: an optional translucent image shown under the editor
+	// canvas to draw over. It never reaches the solver or the saved scene; while
+	// refPosMode is on, canvas drag/wheel move and scale it instead of the camera.
+	ref                        *refImage
+	refPosMode                 bool
+	refDragging                bool
+	refDragLastX, refDragLastY float64
+
 	// Editor sub-mode: GEOMETRY edits the base shape/pivot; ANIMATE scrubs the
 	// timeline and poses keyframes. editTime is the editor's scrub position
 	// (independent of the simulator's animTime).
