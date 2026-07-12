@@ -1040,27 +1040,49 @@ func gridToScreenF(x, y float64) (float64, float64) {
 	return x * pixScale, (float64(gridH-1) - y) * pixScale
 }
 
-// drawOutline strokes the body edge(s) crisply on top of the blocky raster mask:
-// each scene object in scene mode, otherwise the single foil.
+// solidOutlineWidth and brokenOutlineWidth are the stroke widths drawOutline
+// uses for a rasterized (solid) body versus an unclosed reference-only one --
+// heavier, so a shape that never touches the flow still reads clearly on top
+// of the field.
+const (
+	solidOutlineWidth  = 1.5
+	brokenOutlineWidth = 5.0
+)
+
+// colBrokenOutline is the color drawOutline uses for an unclosed (reference-
+// only) object: solid white, brighter than the translucent white the
+// flow-interacting bodies use, so it reads as clearly distinct.
+var colBrokenOutline = color.RGBA{0xff, 0xff, 0xff, 0xff}
+
+// drawOutline strokes the body edge(s) crisply on top of the blocky raster
+// mask: each scene object in scene mode, otherwise the single foil. An
+// unclosed (broken) object never reaches the solver -- it is a reference
+// shape only -- so it is drawn heavier and brighter to read as visually
+// distinct from the solid, flow-interacting bodies.
 func (g *Game) drawOutline(dst *ebiten.Image) {
 	col := color.RGBA{0xff, 0xff, 0xff, 0xd0}
 	if g.scn != nil {
 		t := g.scn.LoopTime(g.animTime)
 		for _, o := range g.scn.Objects {
-			strokeClosed(dst, g.sceneGlobal(o.PolygonAt(t)), col)
+			poly := g.sceneGlobal(o.PolygonAt(t))
+			if o.Broken() {
+				strokeClosed(dst, poly, colBrokenOutline, brokenOutlineWidth)
+				continue
+			}
+			strokeClosed(dst, poly, col, solidOutlineWidth)
 		}
 		return
 	}
-	strokeClosed(dst, g.placedOutline(), col)
+	strokeClosed(dst, g.placedOutline(), col, solidOutlineWidth)
 }
 
-// strokeClosed outlines a closed polygon in viewport space.
-func strokeClosed(dst *ebiten.Image, poly []foil.Point, col color.Color) {
+// strokeClosed outlines a closed polygon in viewport space at the given width.
+func strokeClosed(dst *ebiten.Image, poly []foil.Point, col color.Color, width float32) {
 	for i := range poly {
 		j := (i + 1) % len(poly)
 		x0, y0 := gridToScreen(poly[i].X, poly[i].Y)
 		x1, y1 := gridToScreen(poly[j].X, poly[j].Y)
-		vector.StrokeLine(dst, x0, y0, x1, y1, 1.5, col, true)
+		vector.StrokeLine(dst, x0, y0, x1, y1, width, col, true)
 	}
 }
 
