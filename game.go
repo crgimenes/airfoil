@@ -93,6 +93,10 @@ const (
 	botPnH  = 156
 	winW    = simW + sidePnW
 	winH    = simH + botPnH
+
+	// kioskSliderStripH is the logical height added below the viewport in
+	// kiosk mode when the sliders stay visible: room for all slider rows.
+	kioskSliderStripH = 190
 )
 
 // UI palette.
@@ -145,6 +149,12 @@ type Game struct {
 	paused      bool
 	streamlines bool // overlay integrated streamlines
 	glow        bool // additive bloom on the smoke
+
+	// Kiosk mode: fullscreen, no menu/panels/editor. kioskControls keeps the
+	// AoA/speed/control sliders visible and usable (for a touch/mouse kiosk);
+	// without it, kiosk mode is the flow only.
+	kiosk         bool
+	kioskControls bool
 
 	outline []foil.Point // chord-normalized profile, regenerated on profile change
 
@@ -455,6 +465,17 @@ func (g *Game) menuItems() []menu.Item {
 		{Title: "Loop +0.5s", Disabled: !inAnim, OnClick: act(func() { g.loopDelta(0.5) })},
 	}
 
+	if g.kiosk {
+		// Locked down to just Quit and the way out, regardless of what the
+		// platform does with the menu bar itself in fullscreen.
+		return []menu.Item{
+			{Title: "kutta", Submenu: []menu.Item{
+				{Title: "Exit Kiosk Mode", OnClick: act(g.exitKiosk)},
+				{Title: "Quit kutta", Shortcut: "cmd+q", OnClick: act(func() { g.quit = true })},
+			}},
+		}
+	}
+
 	return []menu.Item{
 		{Title: "kutta", Submenu: []menu.Item{
 			{Title: "Quit kutta", Shortcut: "cmd+q", OnClick: act(func() { g.quit = true })},
@@ -475,6 +496,9 @@ func (g *Game) menuItems() []menu.Item {
 			{Title: mark(g.streamlines) + "Streamlines", OnClick: act(func() { g.streamlines = !g.streamlines })},
 			{Title: mark(g.glow) + "Glow", OnClick: act(func() { g.glow = !g.glow })},
 			{Title: mark(g.paused) + "Pause", OnClick: act(func() { g.paused = !g.paused })},
+			{Separator: true},
+			{Title: "Enter Kiosk Mode", OnClick: act(func() { g.enterKiosk(false) })},
+			{Title: "Enter Kiosk Mode (with Controls)", OnClick: act(func() { g.enterKiosk(true) })},
 		}},
 		{Title: "Foil", Submenu: foilItems},
 		{Title: "Animate", Submenu: animate},
@@ -484,10 +508,10 @@ func (g *Game) menuItems() []menu.Item {
 // menuSignature captures the context the menu depends on; the menu is rebuilt
 // only when it changes (not every frame).
 func (g *Game) menuSignature() string {
-	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v|%s|%v|%v",
+	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v|%s|%v|%v|%v|%v",
 		g.editing, g.editMode, g.scn != nil, g.selObj >= 0, g.mode,
 		g.streamlines, g.glow, g.paused, g.snapOn, g.nacaCode,
-		g.objClip != nil, g.poseClipSet)
+		g.objClip != nil, g.poseClipSet, g.kiosk, g.kioskControls)
 }
 
 // syncMenu rebuilds the native menu on the main thread when the context changed.
@@ -518,8 +542,18 @@ func (g *Game) Update() error {
 	if g.quit {
 		return ebiten.Termination
 	}
-	// E toggles the editor, unless a text field is being typed into.
-	if inpututil.IsKeyJustPressed(ebiten.KeyE) && !g.side.HasFocus() && !g.gui.HasFocus() {
+	// Ctrl+Shift+K flips kiosk mode from anywhere, in or out of the editor --
+	// the escape hatch back to the normal window, and the way back into kiosk
+	// mode without relaunching. Chosen over F11/Ctrl+Alt+K because it doesn't
+	// collide with any default OS shortcut on macOS, Windows, or Linux.
+	ctrl := ebiten.IsKeyPressed(ebiten.KeyControlLeft) || ebiten.IsKeyPressed(ebiten.KeyControlRight)
+	shift := ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight)
+	if ctrl && shift && inpututil.IsKeyJustPressed(ebiten.KeyK) {
+		g.toggleKiosk()
+	}
+	// E toggles the editor, unless a text field is being typed into or a kiosk
+	// is running (kiosk mode never exposes the shape editor).
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) && !g.side.HasFocus() && !g.gui.HasFocus() && !g.kiosk {
 		g.toggleEdit()
 	}
 	if g.editing {
@@ -656,10 +690,14 @@ func (g *Game) runSimToolbar() {
 }
 
 func (g *Game) handleInput() {
-	g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
+	if !g.kiosk {
+		g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
+	}
 	// While typing in the NACA field, let it own the keyboard (sliders still work).
 	if g.gui.HasFocus() {
-		g.runSliders()
+		if !g.kiosk || g.kioskControls {
+			g.runSliders()
+		}
 		return
 	}
 	// L plays/pauses the timeline of an open scene. The fluid keeps simulating
@@ -668,13 +706,15 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyL) && g.scn != nil {
 		g.animPlaying = !g.animPlaying
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) && g.scn != nil {
+	// Escape/Open/Save all change what's loaded or touch the filesystem, so a
+	// kiosk -- unattended and public-facing -- blocks all three.
+	if !g.kiosk && inpututil.IsKeyJustPressed(ebiten.KeyEscape) && g.scn != nil {
 		g.scn = nil
 		g.animPlaying = false
 		g.applyBody(true)
 	}
 	// O opens a scene file through the native dialog.
-	if inpututil.IsKeyJustPressed(ebiten.KeyO) {
+	if !g.kiosk && inpututil.IsKeyJustPressed(ebiten.KeyO) {
 		g.openSceneDialog()
 	}
 	// Angle of attack works in both modes: it pitches the foil, or the whole
@@ -694,14 +734,15 @@ func (g *Game) handleInput() {
 		g.mode = (g.mode + 1) % modeCount
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
+		meta := ebiten.IsKeyPressed(ebiten.KeyMetaLeft) || ebiten.IsKeyPressed(ebiten.KeyMetaRight)
 		switch {
-		case ebiten.IsKeyPressed(ebiten.KeyMetaLeft) || ebiten.IsKeyPressed(ebiten.KeyMetaRight):
+		case meta && !g.kiosk:
 			if ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight) {
 				g.saveSceneAs() // Cmd+Shift+S
 			} else {
 				g.saveScene() // Cmd+S: write to the current file
 			}
-		default:
+		case !meta:
 			g.streamlines = !g.streamlines
 		}
 	}
@@ -725,14 +766,20 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
 		g.setSpeed(g.u0 - 0.01)
 	}
-	g.runSliders()
+	if !g.kiosk || g.kioskControls {
+		g.runSliders()
+	}
 }
 
 // runSliders drives the bottom panel's draggable sliders (minigui): angle of
 // attack and inlet speed, each with a label row whose value column stays put
 // while the knob moves.
 func (g *Game) runSliders() {
-	g.sliders.Begin(ui.InputFromEbiten(), simW+16, simH+30)
+	x, y := simW+16.0, simH+30.0
+	if g.kiosk {
+		x, y = 16.0, simH+20.0
+	}
+	g.sliders.Begin(ui.InputFromEbiten(), x, y)
 	g.sliders.Label(fmt.Sprintf("Angle of attack %17.1f deg", g.alphaDeg))
 	if g.sliders.Slider("aoa", &g.alphaDeg, -aoaLimit, aoaLimit) {
 		g.setAlpha(g.alphaDeg)
@@ -904,6 +951,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	g.drawForces(vp)
 
 	vector.StrokeRect(screen, 0, 0, simW, simH, 1, colSep, false)
+	if g.kiosk {
+		if g.kioskControls {
+			g.sliders.Render(screen)
+		}
+		return
+	}
 	g.drawSidePanel(screen)
 	g.drawBottomPanel(screen)
 	g.gui.Render(screen)     // the minigui toolbar, over the flow's top-left
@@ -1467,6 +1520,16 @@ func drawString(dst *ebiten.Image, s string, x, y float64, clr color.Color) {
 }
 
 // Layout fixes the logical resolution to the window size.
+// Layout fixes the logical resolution to the window size, or to just the
+// viewport (plus a slider strip in the controls variant) in kiosk mode; Ebiten
+// scales and letterboxes that logical canvas to fill the real fullscreen
+// display.
 func (g *Game) Layout(_, _ int) (int, int) {
+	if g.kiosk {
+		if g.kioskControls {
+			return simW, simH + kioskSliderStripH
+		}
+		return simW, simH
+	}
 	return winW, winH
 }

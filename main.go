@@ -4,6 +4,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -14,11 +15,21 @@ import (
 const windowTitle = "kutta — 2D wind tunnel"
 
 func main() {
+	kiosk := flag.Bool("kiosk", false, "start fullscreen in kiosk mode (no menu, no panels)")
+	kioskControls := flag.Bool("kiosk-controls", false, "in kiosk mode, keep the AoA/speed/control sliders visible and usable")
+	flag.Parse()
+
 	ebiten.SetWindowSize(winW, winH)
 	ebiten.SetWindowTitle(windowTitle)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	setWindowIcon()
-	err := ebiten.RunGame(NewGame())
+
+	g := NewGame()
+	if *kiosk {
+		g.enterKiosk(*kioskControls)
+	}
+
+	err := ebiten.RunGame(g)
 	if err != nil {
 		log.Fatal(err)
 	}
