@@ -41,7 +41,7 @@ func TestIsMulticastAddr(t *testing.T) {
 		{"192.168.1.50:9000", false},
 		{"0.0.0.0:9000", false},
 		{"224.0.0.1:9000", true},   // IPv4 multicast, low end of 224.0.0.0/4
-		{"239.255.0.1:1234", true}, // IPv4 multicast, admin-scoped range
+		{"239.192.1.1:1234", true}, // IPv4 multicast, admin-scoped range (kutta's suggested default)
 		{"[ff02::1]:9000", true},   // IPv6 multicast
 		{"not-an-addr", false},
 	}

@@ -17,8 +17,10 @@ import (
 // receive-only.
 //
 // addr is a plain unicast listen (":9000" for all interfaces, "1.2.3.4:9000"
-// for one) or a multicast group address ("224.0.0.1:9000"), chosen
-// automatically by whether the host parses as a multicast IP.
+// for one) or a multicast group address ("239.192.1.1:9000" -- pick from the
+// 239.0.0.0/8 administratively-scoped range, RFC 2365, reserved for exactly
+// this kind of private/local use), chosen automatically by whether the host
+// parses as a multicast IP.
 //
 // Channels: AOA and SPD (angle of attack, inlet speed, both numeric), GLOW
 // and STREAMLINES (0 or 1), and MODE (speed, vorticity, or pressure). A
