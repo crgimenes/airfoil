@@ -16,14 +16,20 @@ const windowTitle = "kutta — 2D wind tunnel"
 
 func main() {
 	scenePath := flag.String("scene", "", "path to an .afoil scene file to load at startup instead of the interactive default foil")
+	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
+	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
 	flag.Parse()
 
 	ebiten.SetWindowSize(winW, winH)
 	ebiten.SetWindowTitle(windowTitle)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	setWindowIcon()
+	if *fullscreen {
+		ebiten.SetFullscreen(true)
+	}
 
 	g := NewGame()
+	g.clean = *hideControls
 	if *scenePath != "" {
 		err := g.loadSceneFile(*scenePath)
 		if err != nil {

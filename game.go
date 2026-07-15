@@ -145,6 +145,7 @@ type Game struct {
 	paused      bool
 	streamlines bool // overlay integrated streamlines
 	glow        bool // additive bloom on the smoke
+	clean       bool // kiosk mode: draw only the flow image, hide every panel/control
 
 	outline []foil.Point // chord-normalized profile, regenerated on profile change
 
@@ -656,11 +657,15 @@ func (g *Game) runSimToolbar() {
 }
 
 func (g *Game) handleInput() {
-	g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
-	// While typing in the NACA field, let it own the keyboard (sliders still work).
-	if g.gui.HasFocus() {
-		g.runSliders()
-		return
+	// Kiosk mode hides the toolbar and sliders but keeps the hotkeys live, so an
+	// operator (or a hardware controller over the keys) can still drive it.
+	if !g.clean {
+		g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
+		// While typing in the NACA field, let it own the keyboard (sliders work).
+		if g.gui.HasFocus() {
+			g.runSliders()
+			return
+		}
 	}
 	// L plays/pauses the timeline of an open scene. The fluid keeps simulating
 	// either way, so the surfaces can be frozen at any pose while the flow
@@ -725,7 +730,9 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
 		g.setSpeed(g.u0 - 0.01)
 	}
-	g.runSliders()
+	if !g.clean {
+		g.runSliders()
+	}
 }
 
 // runSliders drives the bottom panel's draggable sliders (minigui): angle of
@@ -778,18 +785,11 @@ func (g *Game) openSceneDialog() {
 		g.noDialogHint()
 		return // cancelled, or unsupported platform
 	}
-	src, err := os.ReadFile(path) // #nosec G304 -- path chosen by the user via the native dialog
-	if err != nil {
+	// Same load path as the -scene flag: reads, parses, sets the scene and makes
+	// the opened file the target for a plain Save.
+	if err := g.loadSceneFile(path); err != nil {
 		g.sceneErr = err.Error()
-		return
 	}
-	sc, err := sceneio.Load(string(src))
-	if err != nil {
-		g.sceneErr = err.Error()
-		return
-	}
-	g.setScene(sc, path)
-	g.savePath = path // the file just opened is the natural target for plain Save
 }
 
 // setScene switches to a loaded scene, paused at t=0, and pushes its solid to the
@@ -919,6 +919,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.drawMarkers(vp)
 	g.drawForces(vp)
+
+	// Kiosk mode stops here: only the flow image, no panels, toolbar, sliders or
+	// border. Layout already shrank the window to the viewport, so the flow
+	// fills it (and scales to fill the screen under -fullscreen).
+	if g.clean {
+		return
+	}
 
 	vector.StrokeRect(screen, 0, 0, simW, simH, 1, colSep, false)
 	g.drawSidePanel(screen)
@@ -1507,5 +1514,8 @@ func drawString(dst *ebiten.Image, s string, x, y float64, clr color.Color) {
 
 // Layout fixes the logical resolution to the window size.
 func (g *Game) Layout(_, _ int) (int, int) {
+	if g.clean {
+		return simW, simH // kiosk: the flow fills the window, no panels
+	}
 	return winW, winH
 }
