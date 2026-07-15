@@ -96,6 +96,20 @@ after installing the packages from the
 Debian/Ubuntu: `libgl1-mesa-dev`, `libasound2-dev`, `libxcursor-dev`, `libxi-dev`,
 `libxinerama-dev`, `libxrandr-dev`, `libxxf86vm-dev`, `pkg-config`).
 
+## Command-line flags
+
+| Flag | Effect |
+| --- | --- |
+| `-scene path.afoil` | load a scene at startup instead of the interactive foil |
+| `-fullscreen` | start in full screen |
+| `-hidecontrols` | hide every panel and control, showing only the flow image |
+
+The flags combine into a kiosk. `kutta -scene wing.afoil -fullscreen -hidecontrols`
+boots straight into a scene, full screen, with nothing on screen but the flow.
+The keys still work, so a controller wired to the keyboard (or a person) can drive
+angle of attack and speed with no visible UI. A bad `-scene` path logs a warning
+and falls back to the normal foil rather than failing to start.
+
 ## Controls
 
 | Key | Action |
