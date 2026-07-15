@@ -4,6 +4,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 
 	"github.com/hajimehoshi/ebiten/v2"
@@ -14,11 +15,23 @@ import (
 const windowTitle = "kutta — 2D wind tunnel"
 
 func main() {
+	scenePath := flag.String("scene", "", "path to an .afoil scene file to load at startup instead of the interactive default foil")
+	flag.Parse()
+
 	ebiten.SetWindowSize(winW, winH)
 	ebiten.SetWindowTitle(windowTitle)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	setWindowIcon()
-	err := ebiten.RunGame(NewGame())
+
+	g := NewGame()
+	if *scenePath != "" {
+		err := g.loadSceneFile(*scenePath)
+		if err != nil {
+			log.Printf("kutta: -scene %q: %v", *scenePath, err)
+		}
+	}
+
+	err := ebiten.RunGame(g)
 	if err != nil {
 		log.Fatal(err)
 	}
