@@ -12,12 +12,14 @@ import (
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
-// refImage is a reference photo or drawing shown translucently under the
-// editor canvas so the pen tool can trace over it. It is positioned in world
-// (grid) coordinates like everything the editor draws, but it is a tracing
-// aid only: it never reaches the solver and is never written into a saved
-// scene, so opening a .afoil someone else authored never depends on it.
-type refImage struct {
+// Reference backdrop: a photo or scanned drawing shown translucently under
+// the editor canvas so the pen tool can trace over it. It is positioned in
+// world (grid) coordinates like everything else the editor draws, but it is
+// ONLY a drawing aid: kept in memory, never part of the scene, so it never
+// reaches the solver and opening a .afoil someone else authored never
+// depends on it. Same role as linefire's mapeditor/backdrop.go, which this
+// mirrors.
+type backdropImage struct {
 	img     *ebiten.Image
 	path    string
 	x, y    float64 // world position of the image's top-left corner
@@ -26,14 +28,22 @@ type refImage struct {
 	visible bool
 }
 
-// defaultRefOpacity keeps the image dim enough that a traced line over it
-// stays legible.
-const defaultRefOpacity = 0.5
+// backdropDefaultAlpha is the starting opacity: faint enough that a traced
+// line reads clearly on top.
+const backdropDefaultAlpha = 0.5
 
-// loadReferenceImage prompts for a PNG or JPEG and installs it as the
-// editor's trace reference, fit to most of the current view and centered on
-// it. Replaces any previously loaded reference.
-func (g *Game) loadReferenceImage() {
+// backdropAlphaMin and backdropAlphaMax clamp opacity so the backdrop can
+// never fully vanish (impossible to find again) or fully cover (impossible
+// to see what's being traced under it).
+const (
+	backdropAlphaMin = 0.1
+	backdropAlphaMax = 1.0
+)
+
+// loadBackdrop prompts for a PNG or JPEG and installs it as the editor's
+// trace reference, fit to most of the current view and centered on it.
+// Replaces any previously loaded backdrop.
+func (g *Game) loadBackdrop() {
 	var path string
 	ebiten.RunOnMainThread(func() {
 		path = filedialog.Open(filedialog.Options{
@@ -68,55 +78,59 @@ func (g *Game) loadReferenceImage() {
 	}
 	cx, cy := g.cam.screenToWorld(simW/2, simH/2)
 
-	g.ref = &refImage{
+	g.backdrop = &backdropImage{
 		img:     img,
 		path:    path,
 		x:       cx - iw*scale/2,
 		y:       cy + ih*scale/2,
 		scale:   scale,
-		opacity: defaultRefOpacity,
+		opacity: backdropDefaultAlpha,
 		visible: true,
 	}
-	g.refPosMode = true // land in position mode so it can be aligned right away
+	g.backdropPosMode = true // land in position mode so it can be aligned right away
 	g.sceneErr = ""
 }
 
-// clearReference drops the loaded reference image.
-func (g *Game) clearReference() {
-	g.ref = nil
-	g.refPosMode = false
+// clearBackdrop drops the loaded backdrop image.
+func (g *Game) clearBackdrop() {
+	g.backdrop = nil
+	g.backdropPosMode = false
 }
 
-// handleReferenceInput drives move (drag) and scale (wheel, anchored at the
-// cursor) of the reference image while position mode is active. It reports
+// handleBackdropInput drives move (drag) and scale (wheel, anchored at the
+// cursor) of the backdrop image while position mode is active. It reports
 // whether it consumed the input, so the caller skips camera pan, object
 // dragging and the pen tool for that frame.
-func (g *Game) handleReferenceInput(mx, my float64, inCanvas bool) bool {
-	if !g.refPosMode || g.ref == nil {
+func (g *Game) handleBackdropInput(mx, my float64, inCanvas bool) bool {
+	if !g.backdropPosMode || g.backdrop == nil {
 		return false
 	}
 	_, dy := ebiten.Wheel()
 	if dy != 0 && inCanvas {
-		g.scaleReferenceAt(mx, my, 1+dy*0.1)
+		g.scaleBackdropAt(mx, my, 1+dy*0.1)
 	}
 	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && inCanvas {
-		g.refDragging = true
-		g.refDragLastX, g.refDragLastY = mx, my
+		g.backdropDragging = true
+		g.backdropDragLastX, g.backdropDragLastY = mx, my
 	}
-	if g.refDragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
-		g.ref.x += (mx - g.refDragLastX) / g.cam.zoom
-		g.ref.y -= (my - g.refDragLastY) / g.cam.zoom
-		g.refDragLastX, g.refDragLastY = mx, my
+	if g.backdropDragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		g.backdrop.x += (mx - g.backdropDragLastX) / g.cam.zoom
+		g.backdrop.y -= (my - g.backdropDragLastY) / g.cam.zoom
+		g.backdropDragLastX, g.backdropDragLastY = mx, my
 		return true
 	}
-	g.refDragging = false
+	g.backdropDragging = false
 	return true
 }
 
-// scaleReferenceAt rescales the reference image by factor, keeping the world
+// scaleBackdropAt rescales the backdrop image by factor, keeping the world
 // point under the cursor fixed -- the same feel as the camera's own zoom.
-func (g *Game) scaleReferenceAt(sx, sy, factor float64) {
-	r := g.ref
+// (linefire's scaleBackdrop keeps the image's own center fixed instead,
+// since its keyboard-driven -/= shortcuts have no cursor position to anchor
+// to; kutta's wheel-driven scaling anchors at the cursor like the camera
+// zoom it sits alongside.)
+func (g *Game) scaleBackdropAt(sx, sy, factor float64) {
+	r := g.backdrop
 	wx, wy := g.cam.screenToWorld(sx, sy)
 	b := r.img.Bounds()
 	iw, ih := float64(b.Dx()), float64(b.Dy())
@@ -130,10 +144,10 @@ func (g *Game) scaleReferenceAt(sx, sy, factor float64) {
 	r.y = wy + v*r.scale*ih
 }
 
-// drawReference paints the loaded trace reference under the outlines, faded
-// by its opacity so a traced line stays legible over it.
-func (g *Game) drawReference(vp *ebiten.Image) {
-	r := g.ref
+// drawBackdrop paints the loaded trace backdrop under the outlines, faded by
+// its opacity so a traced line stays legible over it.
+func (g *Game) drawBackdrop(vp *ebiten.Image) {
+	r := g.backdrop
 	if r == nil || !r.visible {
 		return
 	}
