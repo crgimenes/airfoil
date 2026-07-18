@@ -58,10 +58,11 @@ const (
 
 	aoaMin = -20 // sweep range of the live Cl-alpha plot, in degrees
 	aoaMax = 20
-	// aoaLimit is the full angle-of-attack range the control allows, well past
-	// the plot range so the foil can be turned broadside (90 deg) to the flow as
-	// a what-if. Beyond the linear region this is a qualitative demo, not data.
-	aoaLimit  = 90
+	// aoaLimit spans the slider: a full turn, so the foil can be put at any
+	// orientation (broadside, reversed, upside down) as a what-if. The angle
+	// wraps at +-180, so the arrow keys spin it continuously. Beyond the linear
+	// region this is a qualitative demo, not data.
+	aoaLimit  = 180
 	clPlotMin = -2.0 // Cl axis range of the plot
 	clPlotMax = 2.0
 
@@ -882,7 +883,16 @@ func (g *Game) saveSceneAs() {
 // rotation each frame, so nothing else is needed here.
 func (g *Game) setAlpha(deg float64) {
 	g.simErr = ""
-	g.alphaDeg = math.Max(-aoaLimit, math.Min(aoaLimit, deg))
+	// Free rotation: wrap into (-180, 180] instead of clamping, so stepping
+	// past either end keeps spinning the foil the same way.
+	a := math.Mod(deg, 360)
+	if a > 180 {
+		a -= 360
+	}
+	if a <= -180 {
+		a += 360
+	}
+	g.alphaDeg = a
 	if g.scn == nil {
 		g.applyBody(false)
 		return

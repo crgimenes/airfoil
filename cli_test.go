@@ -37,3 +37,25 @@ func TestKioskLayout(t *testing.T) {
 		t.Fatalf("kiosk layout = %dx%d, want %dx%d", w, h, simW, simH)
 	}
 }
+
+// TestSetAlphaWraps pins free rotation: the angle wraps at +-180 instead of
+// clamping, so arrow keys can spin the foil through a full turn.
+func TestSetAlphaWraps(t *testing.T) {
+	g := simGame()
+	cases := []struct{ in, want float64 }{
+		{45, 45},
+		{90, 90},
+		{180, 180},
+		{185, -175},
+		{-185, 175},
+		{-180, 180},
+		{360, 0},
+		{541, -179},
+	}
+	for _, c := range cases {
+		g.setAlpha(c.in)
+		if g.alphaDeg != c.want {
+			t.Errorf("setAlpha(%g): alphaDeg = %g, want %g", c.in, g.alphaDeg, c.want)
+		}
+	}
+}
