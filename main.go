@@ -24,12 +24,12 @@ func main() {
 	ebiten.SetWindowTitle(windowTitle)
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	setWindowIcon()
-	if *fullscreen {
-		ebiten.SetFullscreen(true)
-	}
-
 	g := NewGame()
 	g.clean = *hideControls
+	// Fullscreen is applied on the first Update, not here: entering fullscreen
+	// before the window exists leaves the first frame black on macOS until a
+	// resize. Deferring reproduces the toggle-after-launch path, which works.
+	g.startFullscreen = *fullscreen
 	if *scenePath != "" {
 		err := g.loadSceneFile(*scenePath)
 		if err != nil {
