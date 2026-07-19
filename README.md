@@ -1,6 +1,6 @@
 # kutta - 2D wind tunnel
 
-![kutta](https://github.com/crgimenes/kutta/blob/trunk/fixtures/kutta.gif)
+![kutta](imgs/kutta.webp)
 
 A 2D wind tunnel for aeromodelers and anyone who likes watching air misbehave.
 It streams a flow past an airfoil and draws the speed field, the vorticity, smoke
