@@ -38,7 +38,6 @@ const (
 	spdMin   = 0.02 // inlet speed range where the solver stays stable
 	spdMax   = 0.15
 
-	substeps    = 3    // solver steps per displayed frame
 	tracerSpeed = 5.0  // visual advection multiplier for smoke tracers
 	nParticles  = 3000 // dense enough to fill the whole tunnel, not just the centre
 

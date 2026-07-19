@@ -33,7 +33,11 @@ body {
   color: var(--fg);
   font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
-main { max-width: 1000px; margin: 0 auto; }
+/* The simulator wants 1380 CSS pixels, its own logical width, so the browser
+   scales it by a whole number instead of a fractional one that softens every
+   glyph. Prose stays at a readable measure and the tunnel breaks out past it. */
+main { max-width: 1380px; margin: 0 auto; }
+main > *:not(#stage) { max-width: 1000px; }
 h1 { font-size: 1.6rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
 h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; }
 .tagline { color: var(--dim); margin: 0 0 1.5rem; }
@@ -46,7 +50,10 @@ a { color: var(--accent); }
 #stage {
   width: 100%;
   aspect-ratio: 1380 / 756;
-  border: 1px solid var(--line);
+  /* An outline rather than a border: a border eats two pixels of the inner
+     width, which is enough to knock the scale off a whole number. */
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
   border-radius: 6px;
   overflow: hidden;
   background: #000;
