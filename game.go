@@ -148,6 +148,13 @@ type Game struct {
 	glow        bool // additive bloom on the smoke
 	clean       bool // kiosk mode: draw only the flow image, hide every panel/control
 
+	// startFullscreen defers the -fullscreen flag until a few frames have been
+	// drawn: entering fullscreen during startup blanks the screen on macOS (it
+	// stays black until a resize), while toggling after launch works. The
+	// countdown waits out window creation, the first draws and the native menu.
+	startFullscreen bool
+	fsCountdown     int
+
 	outline []foil.Point // chord-normalized profile, regenerated on profile change
 
 	fieldImg *ebiten.Image // gridW×gridH scalar field
@@ -523,6 +530,13 @@ func (g *Game) syncMenu() {
 }
 
 func (g *Game) Update() error {
+	if g.startFullscreen {
+		g.fsCountdown++
+		if g.fsCountdown > 20 {
+			g.startFullscreen = false
+			ebiten.SetFullscreen(true)
+		}
+	}
 	g.syncMenu()
 	g.drainPending()
 	g.handleDroppedFiles()
