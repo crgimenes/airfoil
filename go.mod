@@ -5,7 +5,7 @@ go 1.26.5
 require (
 	github.com/crgimenes/filo v0.0.16
 	github.com/crgimenes/glaze v0.0.31
-	github.com/crgimenes/minigui v0.1.8
+	github.com/crgimenes/minigui v0.1.9
 	github.com/hajimehoshi/ebiten/v2 v2.10.0-alpha.12
 	golang.org/x/image v0.44.0
 )

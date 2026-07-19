@@ -4,6 +4,8 @@ github.com/crgimenes/glaze v0.0.31 h1:c1Qq+UtAuWS3r74CW+2N088rlSdKW0CIFWIqemWbUW
 github.com/crgimenes/glaze v0.0.31/go.mod h1:vlN6LA8BiiUrJL9T/Q4dVGKlGnYX/kAnvdUZq8u0DBU=
 github.com/crgimenes/minigui v0.1.8 h1:dLdO95Hn/3SDMVdpo3PbtnQB/pdMVdt2uOqFPW6Xl94=
 github.com/crgimenes/minigui v0.1.8/go.mod h1:GEqF1iSYX7zURC7NOTVFcC5e4pOGxJtAzkfYxU2rv5U=
+github.com/crgimenes/minigui v0.1.9 h1:D432XNJE4WsZBrFzmgzfTuTYw4yzBwAmmusCHKCebrk=
+github.com/crgimenes/minigui v0.1.9/go.mod h1:aP4n8LCLDaSL7pQDh4RyZ5qlFPGDvfhb9tFn6Fw9cRs=
 github.com/crgimenes/native v0.1.5 h1:DeuqxhlgEkOJGvLMole/8fzahW7vTpgtMkx+EmKD1/g=
 github.com/crgimenes/native v0.1.5/go.mod h1:5HCo6NG4HoCJncT4LtCtCqH4+5AH7CGFFACsqowHIKs=
 github.com/ebitengine/gomobile v0.0.0-20260211053922-3d992dae95d1 h1:U8WldvN7/4cgo65U2fr2urv43/yhqYOK5FegFPPfI4M=
