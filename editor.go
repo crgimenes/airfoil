@@ -203,16 +203,16 @@ func (g *Game) editorInput() {
 		return
 	}
 
-	mx, my := ebiten.CursorPosition()
-	fmx, fmy := float64(mx), float64(my)
+	mx, my := g.ptr.pos()
+	fmx, fmy := g.ptr.posF()
 	inCanvas := mx >= 0 && mx < simW && my >= 0 && my < simH
 
 	// A press in the canvas defocuses the name field so shortcuts resume.
-	if inCanvas && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if inCanvas && g.ptr.pressed {
 		g.side.ClearFocus()
 	}
 	// Clicks on the toolbar row are handled by minigui; ignore them here.
-	if my >= simH && my < simH+40 && inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
+	if my >= simH && my < simH+40 && g.ptr.pressed {
 		return
 	}
 
@@ -234,16 +234,16 @@ func (g *Game) editorInput() {
 		g.cam.zoomAt(fmx, fmy, 1+dy*0.1)
 	}
 
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && inCanvas {
+	if g.ptr.pressed && inCanvas {
 		if g.doubleClickInsert(fmx, fmy) {
 			return
 		}
 		g.beginDrag(fmx, fmy)
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if g.ptr.down {
 		g.updateDrag(fmx, fmy)
 	}
-	if inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+	if g.ptr.released {
 		// A bare click that grabbed nothing selects (or clears) the object.
 		if g.dragK == dragNone && !g.dragMoved && inCanvas {
 			g.selectAt(fmx, fmy)
@@ -326,7 +326,7 @@ func (g *Game) loopDelta(d float64) {
 func (g *Game) handleScrub(mx, my float64) bool {
 	tx, ty, tw, th := g.timelineRect()
 	inStrip := mx >= tx && mx <= tx+tw && my >= ty-8 && my <= ty+th+8
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && inStrip {
+	if g.ptr.pressed && inStrip {
 		k := g.keyAtStrip(mx)
 		if k >= 0 {
 			g.beginKeyDrag(k) // grabbing a keyframe tick retimes it
@@ -335,7 +335,7 @@ func (g *Game) handleScrub(mx, my float64) bool {
 		}
 	}
 	if g.draggingKey {
-		if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		if g.ptr.down {
 			g.dragKeyTo(mx)
 		} else {
 			g.endKeyDrag()
@@ -345,7 +345,7 @@ func (g *Game) handleScrub(mx, my float64) bool {
 	if !g.scrubbing {
 		return false
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if g.ptr.down {
 		g.scrubTo(mx)
 		return true
 	}
@@ -1149,8 +1149,8 @@ func (g *Game) startDraw() {
 // becomes its Bezier tangent (a short drag is a corner). Press near the first
 // anchor (or Enter) closes the path; Esc cancels. Wheel still zooms.
 func (g *Game) drawInput() {
-	mx, my := ebiten.CursorPosition()
-	fmx, fmy := float64(mx), float64(my)
+	mx, my := g.ptr.pos()
+	fmx, fmy := g.ptr.posF()
 	inCanvas := mx >= 0 && mx < simW && my >= 0 && my < simH
 
 	_, dy := ebiten.Wheel()
@@ -1165,7 +1165,7 @@ func (g *Game) drawInput() {
 		g.finishDraft()
 		return
 	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && inCanvas {
+	if g.ptr.pressed && inCanvas {
 		if len(g.draftPts) >= 3 {
 			fx, fy := g.cam.worldToScreen(g.draftPts[0].X, g.draftPts[0].Y)
 			if math.Hypot(fmx-fx, fmy-fy) <= handleHit {
@@ -1178,7 +1178,7 @@ func (g *Game) drawInput() {
 		g.penAnchor = foil.Point{X: wx, Y: wy}
 		g.penActive = true
 	}
-	if g.penActive && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
+	if g.penActive && g.ptr.released {
 		g.commitPenNode(fmx, fmy)
 	}
 }
@@ -1513,8 +1513,7 @@ func (g *Game) drawDraft(vp *ebiten.Image) {
 		sx, sy := g.cam.worldToScreen(p.X, p.Y)
 		vector.FillCircle(vp, float32(sx), float32(sy), 2.5, colVertex, true)
 	}
-	mx, my := ebiten.CursorPosition()
-	fmx, fmy := float64(mx), float64(my)
+	fmx, fmy := g.ptr.posF()
 	// While the button is held, preview the tangent being pulled (both sides).
 	if g.penActive {
 		ax, ay := g.cam.worldToScreen(g.penAnchor.X, g.penAnchor.Y)
@@ -1567,7 +1566,7 @@ func (g *Game) drawGizmo(vp *ebiten.Image, o *scene.Object) {
 		}
 		if g.connectFrom >= 0 && g.connectFrom < len(o.Shape) {
 			cx, cy := g.cam.worldToScreen(o.Shape[g.connectFrom].X, o.Shape[g.connectFrom].Y)
-			mx, my := ebiten.CursorPosition()
+			mx, my := g.ptr.pos()
 			vector.StrokeLine(vp, float32(cx), float32(cy), float32(mx), float32(my), 1, colObjSel, true)
 		}
 	}
@@ -1618,7 +1617,7 @@ func (g *Game) hoverLabel(sx, sy float64) string {
 
 // drawHoverHint shows a tooltip for the gizmo element under the cursor.
 func (g *Game) drawHoverHint(vp *ebiten.Image) {
-	mx, my := ebiten.CursorPosition()
+	mx, my := g.ptr.pos()
 	if mx < 0 || mx >= simW || my < 0 || my >= simH {
 		return
 	}

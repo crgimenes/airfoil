@@ -136,6 +136,8 @@ type Game struct {
 	sim   *lbm.Solver
 	smoke *viz.Particles
 
+	ptr pointer // this frame's pointer, mouse or finger; see pointer.go
+
 	profileIdx  int     // index into profiles for Tab-cycling presets
 	nacaCode    string  // active NACA 4-digit code (any code, not just a preset)
 	nacaInput   string  // NACA code being typed in the toolbar field
@@ -536,6 +538,7 @@ func (g *Game) Update() error {
 			ebiten.SetFullscreen(true)
 		}
 	}
+	g.ptr.sample()
 	g.syncMenu()
 	g.drainPending()
 	g.handleDroppedFiles()

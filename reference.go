@@ -9,7 +9,6 @@ import (
 
 	"github.com/crgimenes/native/filedialog"
 	"github.com/hajimehoshi/ebiten/v2"
-	"github.com/hajimehoshi/ebiten/v2/inpututil"
 )
 
 // Reference backdrop: a photo or scanned drawing shown translucently under
@@ -109,11 +108,11 @@ func (g *Game) handleBackdropInput(mx, my float64, inCanvas bool) bool {
 	if dy != 0 && inCanvas {
 		g.scaleBackdropAt(mx, my, 1+dy*0.1)
 	}
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) && inCanvas {
+	if g.ptr.pressed && inCanvas {
 		g.backdropDragging = true
 		g.backdropDragLastX, g.backdropDragLastY = mx, my
 	}
-	if g.backdropDragging && ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+	if g.backdropDragging && g.ptr.down {
 		g.backdrop.x += (mx - g.backdropDragLastX) / g.cam.zoom
 		g.backdrop.y -= (my - g.backdropDragLastY) / g.cam.zoom
 		g.backdropDragLastX, g.backdropDragLastY = mx, my
