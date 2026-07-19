@@ -653,9 +653,13 @@ func (g *Game) runSimToolbar() {
 	if g.gui.Button("st.save", "Save") {
 		g.saveScene()
 	}
-	g.gui.SameLine()
-	if g.gui.Button("st.saveas", "Save As") {
-		g.saveSceneAs()
+	// Save As picks a destination path, which a browser will not surrender, so
+	// the web build offers only Save and lets the browser file the download.
+	if !onWeb {
+		g.gui.SameLine()
+		if g.gui.Button("st.saveas", "Save As") {
+			g.saveSceneAs()
+		}
 	}
 	g.gui.SameLine()
 	if g.gui.Button("st.field", fieldName(g.mode)) {
@@ -841,6 +845,10 @@ func (g *Game) sceneToSave() *scene.Scene {
 // saveScene writes to the current file without prompting; with no current file
 // (nothing saved/opened yet) it falls back to Save As.
 func (g *Game) saveScene() {
+	if onWeb {
+		g.downloadScene()
+		return
+	}
 	if g.savePath == "" {
 		g.saveSceneAs()
 		return
@@ -855,6 +863,22 @@ func (g *Game) saveScene() {
 		g.sceneErr = err.Error()
 		return
 	}
+	g.sceneErr = ""
+}
+
+// downloadScene serializes the scene and hands it to the browser, which is what
+// saving means with no filesystem to write to.
+func (g *Game) downloadScene() {
+	text, err := sceneio.Save(g.sceneToSave())
+	if err != nil {
+		g.sceneErr = err.Error()
+		return
+	}
+	name := "untitled" + sceneio.Ext
+	if g.scenePath != "" {
+		name = filepath.Base(g.scenePath)
+	}
+	offerDownload(name, []byte(text))
 	g.sceneErr = ""
 }
 
