@@ -17,6 +17,14 @@ wing.
 Written in Go with [Ebitengine](https://ebitengine.org). One executable, nothing
 to install alongside it.
 
+## Try it in your browser
+
+**[Open the wind tunnel →](https://crgimenes.github.io/kutta/)**
+
+The whole simulator runs as WebAssembly, with nothing to install. A browser tab
+cannot reach your files, so opening and saving `.afoil` scenes, importing SVG and
+the native menu are desktop only.
+
 ## Download (no Go required)
 
 Grab a prebuilt binary from the
