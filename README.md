@@ -181,6 +181,20 @@ headlessly. `cmd/snapshot` renders the fields to PNG without a GPU, which is how
 the physics gets sanity-checked: lift rising with angle of attack, the drag
 bucket, the force signs coming out right.
 
+## Gallery
+
+Scenes built in the editor and run in the tunnel. Each one is an `.afoil` file
+under [`examples/`](examples/), so you can open it yourself with
+`kutta -scene examples/<name>.afoil`.
+
+[![Ferrari's Macarena rear wing simulated in kutta](imgs/macarena-wing.webp)](examples/macarena.afoil)
+
+**Ferrari's "Macarena" rear wing.** The upper element rotates flat on the
+straight and the wake behind it collapses, dropping downforce by more than half,
+then swings back for the corner. Both profiles are inverted NACA sections, so
+lift is negative: this wing pushes down.
+Scene: [`examples/macarena.afoil`](examples/macarena.afoil).
+
 ## License
 
 See [LICENSE](LICENSE).
