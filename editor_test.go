@@ -605,3 +605,29 @@ func TestPointInPoly(t *testing.T) {
 		t.Error("outside point reported inside")
 	}
 }
+
+// TestJoinChainsPicksClosestOrientation checks that two open chains join
+// end-to-end regardless of which direction each was drawn in: b reversed
+// relative to a should still produce one continuous loop, not a crossed one.
+func TestJoinChainsPicksClosestOrientation(t *testing.T) {
+	// a: (0,0) -> (10,0), the top surface, LE to TE.
+	a := []foil.Point{{X: 0, Y: 0}, {X: 5, Y: 1}, {X: 10, Y: 0}}
+	// b drawn TE -> LE (the natural way to trace a bottom surface back), so it
+	// already abuts a's end without needing a reversal.
+	b := []foil.Point{{X: 10, Y: 0}, {X: 5, Y: -1}, {X: 0, Y: 0}}
+	got := joinChains(a, b)
+	if len(got) != len(a)+len(b) {
+		t.Fatalf("got %d points, want %d", len(got), len(a)+len(b))
+	}
+	if got[0] != a[0] || got[len(a)] != b[0] {
+		t.Errorf("expected a then b unreversed, got %+v", got)
+	}
+
+	// Same two shapes, but b traced the other way (LE -> TE): joinChains should
+	// reverse it internally so the result is still one continuous loop.
+	bRev := reversePoints(b)
+	got2 := joinChains(a, bRev)
+	if got2[len(a)] != b[0] {
+		t.Errorf("expected joinChains to reverse b back to TE-first, got seam point %+v", got2[len(a)])
+	}
+}

@@ -44,6 +44,9 @@ func Save(s *scene.Scene) (string, error) {
 			}
 			b.WriteString(")")
 		}
+		if o.Control {
+			b.WriteString("\n    (control)")
+		}
 		fmt.Fprintf(&b, "\n    (pivot %s %s)", num(o.Pivot.X), num(o.Pivot.Y))
 		if len(o.Keys) > 0 {
 			b.WriteString("\n    (keys")
