@@ -61,6 +61,11 @@ type Object struct {
 	// (not a solid). Empty means a fully closed loop.
 	Gaps []bool
 	Keys []Key // sorted by T ascending; empty means a static identity pose
+	// Control marks this object as directly driven by an external input (e.g. a
+	// UI slider) instead of its keyframe track. PoseAt/PolygonAt still resolve
+	// the authored keyframes as normal either way; interpreting Control -- and
+	// deciding what pose to use instead -- is up to the host.
+	Control bool
 }
 
 // Broken reports whether the outline has at least one edge cut, so it is not a
