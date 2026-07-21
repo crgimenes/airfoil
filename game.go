@@ -65,6 +65,10 @@ const (
 	clPlotMin = -2.0 // Cl axis range of the plot
 	clPlotMax = 2.0
 
+	// controlLimit is the full deflection range of the live control-surface
+	// slider, in degrees either way.
+	controlLimit = 40
+
 	// Stall indicator thresholds on the surface separation fraction (lbm.Sep).
 	// Calibrated on the default NACA 2412 at this grid/Re by an AoA sweep:
 	// separation begins ~6 deg and grows to ~0.30 near 14 deg. This grid's low
@@ -90,13 +94,16 @@ const (
 	simW    = gridW * pixScale
 	simH    = gridH * pixScale
 	sidePnW = 300
-	botPnH  = 156
-	winW    = simW + sidePnW
-	winH    = simH + botPnH
+	// botPnH is tall enough for the controls list plus three slider rows (speed,
+	// AoA, and the optional control-surface slider) in the bottom-right corner.
+	botPnH = 210
+	winW   = simW + sidePnW
+	winH   = simH + botPnH
 
 	// kioskSliderStripH is the logical height added below the viewport in
-	// kiosk mode when the sliders stay visible: room for all slider rows.
-	kioskSliderStripH = 190
+	// kiosk mode when the sliders stay visible: room for all slider rows,
+	// including the optional control-surface slider.
+	kioskSliderStripH = 244
 )
 
 // UI palette.
@@ -147,6 +154,7 @@ type Game struct {
 	nacaInput   string  // NACA code being typed in the toolbar field
 	alphaDeg    float64 // angle of attack in degrees
 	u0          float64
+	controlDeg  float64 // live deflection of the scene's Control object, in degrees
 	mode        fieldMode
 	paused      bool
 	streamlines bool // overlay integrated streamlines
@@ -396,9 +404,44 @@ func (g *Game) sceneMask(t float64) []bool {
 		if o.Broken() {
 			continue // a cut outline is not a solid until it is closed
 		}
-		foil.RasterizeInto(mask, g.sceneGlobal(o.PolygonAt(t)), gridW, gridH)
+		foil.RasterizeInto(mask, g.sceneGlobal(g.objectPolygon(o, t)), gridW, gridH)
 	}
 	return mask
+}
+
+// objectPolygon resolves an object's posed outline: the live control-surface
+// deflection when the object is marked Control (ignoring its keyframe track
+// entirely), or its normal keyframed pose at t otherwise. The editor's own
+// preview is unaffected by this -- Control only changes simulator playback.
+func (g *Game) objectPolygon(o *scene.Object, t float64) []foil.Point {
+	if o.Control {
+		return scene.Apply(o.Outline(), o.Pivot, scene.Pose{Rot: g.controlDeg, Scale: 1})
+	}
+	return o.PolygonAt(t)
+}
+
+// controlObject returns the scene's live-controlled object (the one Control
+// marks), or nil if none is marked.
+func (g *Game) controlObject() *scene.Object {
+	if g.scn == nil {
+		return nil
+	}
+	for _, o := range g.scn.Objects {
+		if o.Control {
+			return o
+		}
+	}
+	return nil
+}
+
+// setControl changes the live control-surface deflection in place (no reset),
+// re-applying immediately so it moves even while the timeline is paused.
+func (g *Game) setControl(deg float64) {
+	g.controlDeg = math.Max(-controlLimit, math.Min(controlLimit, deg))
+	if g.scn == nil {
+		return
+	}
+	g.sim.UpdateSolid(g.sceneMask(g.scn.LoopTime(g.animTime)))
 }
 
 // Update steps the simulation and handles input.
@@ -460,6 +503,7 @@ func (g *Game) menuItems() []menu.Item {
 		{Title: "Copy Object", Disabled: !inGeom || g.selObj < 0, OnClick: act(g.copyObject)},
 		{Title: "Paste Object", Disabled: !inGeom || g.objClip == nil, OnClick: act(g.pasteObject)},
 		{Title: "Cut Object", Disabled: !inGeom || g.selObj < 0, OnClick: act(g.cutObject)},
+		{Title: "Merge with Clipboard", Disabled: !inGeom || g.selObj < 0 || g.objClip == nil, OnClick: act(g.mergeWithClipboard)},
 	}
 
 	foilItems := make([]menu.Item, 0, len(profiles)+2)
@@ -826,13 +870,19 @@ func (g *Game) runSliders() {
 		x, y = 16.0, simH+20.0
 	}
 	g.sliders.Begin(ui.InputFromEbiten(), x, y)
+	g.sliders.Label(fmt.Sprintf("Inlet speed %25.2f", g.u0))
+	if g.sliders.Slider("spd", &g.u0, spdMin, spdMax) {
+		g.setSpeed(g.u0)
+	}
 	g.sliders.Label(fmt.Sprintf("Angle of attack %17.1f deg", g.alphaDeg))
 	if g.sliders.Slider("aoa", &g.alphaDeg, -aoaLimit, aoaLimit) {
 		g.setAlpha(g.alphaDeg)
 	}
-	g.sliders.Label(fmt.Sprintf("Inlet speed %25.2f", g.u0))
-	if g.sliders.Slider("spd", &g.u0, spdMin, spdMax) {
-		g.setSpeed(g.u0)
+	if g.controlObject() != nil {
+		g.sliders.Label(fmt.Sprintf("Control surface %14.1f deg", g.controlDeg))
+		if g.sliders.Slider("ctrl", &g.controlDeg, -controlLimit, controlLimit) {
+			g.setControl(g.controlDeg)
+		}
 	}
 	g.sliders.End()
 }
@@ -886,6 +936,7 @@ func (g *Game) setScene(sc *scene.Scene, path string) {
 	g.savePath = ""
 	g.animTime = 0
 	g.animPlaying = false
+	g.controlDeg = 0
 	g.sceneErr = ""
 	g.simErr = ""
 	g.resetCurve()
@@ -1207,7 +1258,7 @@ func (g *Game) drawOutline(dst *ebiten.Image) {
 	if g.scn != nil {
 		t := g.scn.LoopTime(g.animTime)
 		for _, o := range g.scn.Objects {
-			poly := g.sceneGlobal(o.PolygonAt(t))
+			poly := g.sceneGlobal(g.objectPolygon(o, t))
 			if o.Broken() {
 				strokeClosed(dst, poly, colBrokenOutline, brokenOutlineWidth)
 				continue

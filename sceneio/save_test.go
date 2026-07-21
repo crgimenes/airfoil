@@ -88,6 +88,40 @@ func TestHandlesRoundTrip(t *testing.T) {
 	}
 }
 
+// TestControlRoundTrip proves the Control flag survives Save/Load, and that it
+// is off by default for an object that never set it.
+func TestControlRoundTrip(t *testing.T) {
+	s := &scene.Scene{
+		Objects: []*scene.Object{
+			{
+				Name:    "flap",
+				Shape:   []foil.Point{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}},
+				Pivot:   foil.Point{X: 5, Y: 5},
+				Control: true,
+			},
+			{
+				Name:  "wing",
+				Shape: []foil.Point{{X: 0, Y: 0}, {X: 20, Y: 0}, {X: 20, Y: 20}},
+				Pivot: foil.Point{X: 10, Y: 10},
+			},
+		},
+	}
+	text, err := Save(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(text)
+	if err != nil {
+		t.Fatalf("reload: %v\n%s", err, text)
+	}
+	if !got.Objects[0].Control {
+		t.Errorf("flap lost its Control flag through round trip:\n%s", text)
+	}
+	if got.Objects[1].Control {
+		t.Errorf("wing should not be Control:\n%s", text)
+	}
+}
+
 // TestLegacyCurvedMigrates proves an old (curved) file loads as smooth tangents.
 func TestLegacyCurvedMigrates(t *testing.T) {
 	src := `(scene (object "o"

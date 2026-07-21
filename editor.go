@@ -1316,6 +1316,9 @@ func (g *Game) editorKeys(fmx, fmy float64, inCanvas bool) {
 		if inpututil.IsKeyJustPressed(ebiten.KeyX) {
 			g.cutObject()
 		}
+		if inpututil.IsKeyJustPressed(ebiten.KeyM) {
+			g.mergeWithClipboard()
+		}
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyTab) {
 		g.toggleEditMode()
@@ -1352,8 +1355,29 @@ func (g *Game) runSidePanel() {
 	if g.selObj >= 0 && g.selObj < len(g.scn.Objects) {
 		g.side.Label("name")
 		g.side.TextField("obj.name", &g.scn.Objects[g.selObj].Name)
+		o := g.scn.Objects[g.selObj]
+		if g.side.Toggle("obj.control", "Control Surface", o.Control) {
+			g.setControlObject(o, !o.Control)
+		}
 	}
 	g.side.End()
+}
+
+// setControlObject sets whether o is the scene's single live-controlled
+// object, clearing the flag on every other object so at most one is active,
+// and zeroing the simulator's control slider so a stale deflection from a
+// previous control object doesn't carry over.
+func (g *Game) setControlObject(o *scene.Object, on bool) {
+	o.Control = on
+	if !on {
+		return
+	}
+	for _, other := range g.scn.Objects {
+		if other != o {
+			other.Control = false
+		}
+	}
+	g.controlDeg = 0
 }
 
 // editorOpen loads a scene through the native dialog and frames it for editing.
@@ -1418,6 +1442,62 @@ func (g *Game) cutObject() {
 	g.scn.Objects = append(g.scn.Objects[:g.selObj], g.scn.Objects[g.selObj+1:]...)
 	g.selObj = -1
 	g.connectFrom = -1
+}
+
+// mergeWithClipboard joins the clipboard object's outline onto the selected
+// object's, picking whichever end-to-end orientation (each chain forward or
+// reversed) brings their loose ends closest together, and replaces the
+// selected object's geometry with the closed result. This is how two open
+// halves drawn separately (e.g. an upper and lower surface traced with the
+// pen tool) become one airfoil. The clipboard object itself is untouched; Cut
+// it first if it should not remain in the scene afterward.
+func (g *Game) mergeWithClipboard() {
+	if g.selObj < 0 || g.objClip == nil {
+		return
+	}
+	o := g.scn.Objects[g.selObj]
+	if len(o.Shape) < 2 || len(g.objClip.Shape) < 2 {
+		return
+	}
+	g.snapshotForUndo()
+	o.Shape = joinChains(o.Shape, g.objClip.Shape)
+	o.Handle = nil
+	o.Gaps = nil
+	o.Pivot = centroid(o.Shape)
+}
+
+// joinChains concatenates two open point chains into one, choosing whichever
+// of the four end-to-end orientations (each chain forward or reversed) brings
+// the two loose-end pairs closest together.
+func joinChains(a, b []foil.Point) []foil.Point {
+	orientations := [][2][]foil.Point{
+		{a, b},
+		{a, reversePoints(b)},
+		{reversePoints(a), b},
+		{reversePoints(a), reversePoints(b)},
+	}
+	bestI, bestCost := 0, math.Inf(1)
+	for i, o := range orientations {
+		ca, cb := o[0], o[1]
+		cost := math.Hypot(ca[len(ca)-1].X-cb[0].X, ca[len(ca)-1].Y-cb[0].Y) +
+			math.Hypot(cb[len(cb)-1].X-ca[0].X, cb[len(cb)-1].Y-ca[0].Y)
+		if cost < bestCost {
+			bestCost, bestI = cost, i
+		}
+	}
+	ca, cb := orientations[bestI][0], orientations[bestI][1]
+	out := make([]foil.Point, 0, len(ca)+len(cb))
+	out = append(out, ca...)
+	out = append(out, cb...)
+	return out
+}
+
+func reversePoints(pts []foil.Point) []foil.Point {
+	out := make([]foil.Point, len(pts))
+	for i, p := range pts {
+		out[len(pts)-1-i] = p
+	}
+	return out
 }
 
 // nextObjectName returns the first unused "objectN" name.
@@ -1725,7 +1805,7 @@ func (g *Game) drawEditorPanels(screen *ebiten.Image) {
 		g.drawTimeline(screen)
 		return
 	}
-	drawString(screen, "P: pen   drag vertex: move   Alt+drag/pink knob: curve   dbl/Shift+click edge: add   Del: cut   join red ends   Cmd+C/V/X: obj", 16, top+44, colLabel)
+	drawString(screen, "P: pen   drag vertex: move   Alt+drag/pink knob: curve   dbl/Shift+click edge: add   Del: cut   join red ends   Cmd+C/V/X/M: obj", 16, top+44, colLabel)
 	drawString(screen, "C: smooth   Cmd+Z: undo   drag empty: pan (or Space)   wheel: zoom", 16, top+64, colLabel)
 }
 
