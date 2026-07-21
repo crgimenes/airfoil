@@ -35,6 +35,11 @@ go.work.sum
 /airfoil
 /snapshot
 
+# GitHub Pages build output: the workflow rebuilds both on every deploy, and
+# wasm_exec.js has to match the toolchain rather than sit here going stale.
+/web/kutta.wasm
+/web/wasm_exec.js
+
 .DS_Store
 
 dist/

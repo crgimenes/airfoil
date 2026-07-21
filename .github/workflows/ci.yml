@@ -58,6 +58,10 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          # The browser build behind the GitHub Pages demo, so a change that
+          # breaks it fails here instead of at deploy time.
+          - goos: js
+            goarch: wasm
 
     steps:
       - name: Checkout code
