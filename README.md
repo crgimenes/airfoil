@@ -1,6 +1,6 @@
 # kutta - 2D wind tunnel
 
-![kutta](https://github.com/crgimenes/kutta/blob/trunk/fixtures/kutta.gif)
+![kutta](imgs/kutta.webp)
 
 A 2D wind tunnel for aeromodelers and anyone who likes watching air misbehave.
 It streams a flow past an airfoil and draws the speed field, the vorticity, smoke
@@ -16,6 +16,14 @@ wing.
 
 Written in Go with [Ebitengine](https://ebitengine.org). One executable, nothing
 to install alongside it.
+
+## Try it in your browser
+
+**[Open the wind tunnel →](https://crgimenes.github.io/kutta/)**
+
+The whole simulator runs as WebAssembly, with nothing to install. A browser tab
+cannot reach your files, so opening and saving `.afoil` scenes, importing SVG and
+the native menu are desktop only.
 
 ## Download (no Go required)
 
@@ -96,6 +104,20 @@ after installing the packages from the
 Debian/Ubuntu: `libgl1-mesa-dev`, `libasound2-dev`, `libxcursor-dev`, `libxi-dev`,
 `libxinerama-dev`, `libxrandr-dev`, `libxxf86vm-dev`, `pkg-config`).
 
+## Command-line flags
+
+| Flag | Effect |
+| --- | --- |
+| `-scene path.afoil` | load a scene at startup instead of the interactive foil |
+| `-fullscreen` | start in full screen |
+| `-hidecontrols` | hide every panel and control, showing only the flow image |
+
+The flags combine into a kiosk. `kutta -scene wing.afoil -fullscreen -hidecontrols`
+boots straight into a scene, full screen, with nothing on screen but the flow.
+The keys still work, so a controller wired to the keyboard (or a person) can drive
+angle of attack and speed with no visible UI. A bad `-scene` path logs a warning
+and falls back to the normal foil rather than failing to start.
+
 ## Controls
 
 | Key | Action |
@@ -166,6 +188,20 @@ interpreted (flatten them before exporting) and holes become solid.
 headlessly. `cmd/snapshot` renders the fields to PNG without a GPU, which is how
 the physics gets sanity-checked: lift rising with angle of attack, the drag
 bucket, the force signs coming out right.
+
+## Gallery
+
+Scenes built in the editor and run in the tunnel. Each one is an `.afoil` file
+under [`examples/`](examples/), so you can open it yourself with
+`kutta -scene examples/<name>.afoil`.
+
+[![Ferrari's Macarena rear wing simulated in kutta](imgs/macarena-wing.webp)](examples/macarena.afoil)
+
+**Ferrari's "Macarena" rear wing.** The upper element rotates flat on the
+straight and the wake behind it collapses, dropping downforce by more than half,
+then swings back for the corner. Both profiles are inverted NACA sections, so
+lift is negative: this wing pushes down.
+Scene: [`examples/macarena.afoil`](examples/macarena.afoil).
 
 ## License
 

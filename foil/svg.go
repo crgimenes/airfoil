@@ -101,7 +101,7 @@ func elementHidden(el xml.StartElement) bool {
 	if strings.TrimSpace(attr(el, "display")) == "none" {
 		return true
 	}
-	for _, decl := range strings.Split(attr(el, "style"), ";") {
+	for decl := range strings.SplitSeq(attr(el, "style"), ";") {
 		prop, val, ok := strings.Cut(decl, ":")
 		if ok && strings.TrimSpace(prop) == "display" && strings.TrimSpace(val) == "none" {
 			return true
@@ -468,10 +468,7 @@ func parseArc(sc *pathScanner, b *pathBuilder, rel bool) error {
 		delta += 2 * math.Pi
 	}
 
-	n := int(math.Ceil(math.Abs(delta) / (2 * math.Pi) * ellipseSegments))
-	if n < 2 {
-		n = 2
-	}
+	n := max(int(math.Ceil(math.Abs(delta)/(2*math.Pi)*ellipseSegments)), 2)
 	for s := 1; s <= n; s++ {
 		sinT, cosT := math.Sincos(theta + delta*float64(s)/float64(n))
 		b.add(Point{

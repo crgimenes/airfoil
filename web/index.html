@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kutta — 2D wind tunnel in your browser</title>
+<meta name="description" content="A 2D wind tunnel running in the browser. Stream air past an airfoil, turn the angle of attack, and watch the wake fall apart.">
+
+<meta property="og:title" content="kutta — 2D wind tunnel">
+<meta property="og:description" content="A 2D wind tunnel running in the browser. Stream air past an airfoil and watch the wake fall apart.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://crgimenes.github.io/kutta/">
+<meta property="og:image" content="https://crgimenes.github.io/kutta/preview.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0e1013;
+  --panel: #171a1f;
+  --line: #272c34;
+  --fg: #e6e8ec;
+  --dim: #9aa3af;
+  --accent: #5eb0ef;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 2rem 1rem 3rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+/* Corner ribbon, drawn rather than fetched so the page keeps needing nothing
+   from the network. The wrapper is a square clipped to the corner; the link
+   inside is a wide band rotated across it. It scrolls away with the header
+   instead of sitting fixed, which would drift over the tunnel. */
+.ribbon {
+  position: absolute;
+  top: 0;
+  right: 0;
+  /* Kept under the height of the heading block so the tip clears the top of the
+     tunnel even when the stage runs the full width of a narrower window. */
+  width: 120px;
+  height: 120px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+.ribbon a {
+  position: absolute;
+  top: 27px;
+  left: -27px;
+  width: 176px;
+  padding: 6px 0;
+  transform: rotate(45deg);
+  background: var(--accent);
+  color: #08121c;
+  font: 600 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: .01em;
+  text-align: center;
+  text-decoration: none;
+  pointer-events: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .45);
+}
+.ribbon a:hover { background: #7cc2f5; }
+.ribbon a:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+/* The simulator wants 1380 CSS pixels, its own logical width, so the browser
+   scales it by a whole number instead of a fractional one that softens every
+   glyph. Prose stays at a readable measure and the tunnel breaks out past it. */
+main { max-width: 1380px; margin: 0 auto; }
+main > *:not(#stage) { max-width: 1000px; }
+h1 { font-size: 1.6rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; }
+.tagline { color: var(--dim); margin: 0 0 1.5rem; }
+a { color: var(--accent); }
+
+/* The simulator runs in an iframe so Ebitengine gets a window whose shape
+   matches the embed box; sizing its canvas inside a page element stretches the
+   render. The ratio is winW/winH from game.go, and a mismatch only costs
+   letterbox bars, so it degrades quietly if that layout changes. */
+#stage {
+  width: 100%;
+  aspect-ratio: 1380 / 756;
+  /* An outline rather than a border: a border eats two pixels of the inner
+     width, which is enough to knock the scale off a whole number. */
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+}
+#stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.note { color: var(--dim); font-size: .9rem; margin: .75rem 0 0; }
+table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+th, td { text-align: left; padding: .4rem .75rem .4rem 0; border-bottom: 1px solid var(--line); }
+th { color: var(--dim); font-weight: 600; }
+kbd {
+  font: 600 .85em ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: .1em .4em;
+  white-space: nowrap;
+}
+code { font: .9em ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg); }
+footer {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: .9rem;
+}
+@media (max-width: 700px) {
+  /* On a narrow screen the ribbon crowds the heading and earns nothing, since
+     the footer already links to the repository. */
+  .ribbon { display: none; }
+}
+@media (max-width: 640px) {
+  body { padding: 1rem .75rem 2rem; }
+  h1 { font-size: 1.3rem; }
+}
+</style>
+</head>
+<body>
+<div class="ribbon"><a href="https://github.com/crgimenes/kutta">Fork me on GitHub</a></div>
+<main>
+  <h1>kutta</h1>
+  <p class="tagline">A 2D wind tunnel for aeromodelers and anyone who likes watching air misbehave.</p>
+
+  <div id="stage">
+    <iframe src="play.html" title="kutta wind tunnel simulator"></iframe>
+  </div>
+
+  <p class="note">
+    Click the tunnel first so it takes the keyboard. Use <kbd>↑</kbd> <kbd>↓</kbd>
+    for the angle of attack and <kbd>V</kbd> to change the field. The controls are
+    mouse and keyboard only, so on a phone or tablet the tunnel runs but nothing
+    responds to touch yet.
+  </p>
+
+  <h2>Controls</h2>
+  <table>
+    <tr><th>Key</th><th>Action</th></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>angle of attack</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>cycle NACA profile</td></tr>
+    <tr><td><kbd>V</kbd></td><td>speed / vorticity / pressure field</td></tr>
+    <tr><td><kbd>S</kbd></td><td>streamlines</td></tr>
+    <tr><td><kbd>G</kbd></td><td>glow / bloom</td></tr>
+    <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>inlet speed</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>pause / resume</td></tr>
+    <tr><td><kbd>N</kbd></td><td>single step, while paused</td></tr>
+    <tr><td><kbd>R</kbd></td><td>reset the flow</td></tr>
+    <tr><td><kbd>E</kbd></td><td>open the editor</td></tr>
+    <tr><td><kbd>L</kbd></td><td>play / pause the animation</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>back to the foil</td></tr>
+  </table>
+  <p class="note">
+    Type a code in the field at the top (<code>2412</code>, <code>0012</code>,
+    <code>23012</code>) to pick any NACA 4- or 5-digit foil. Type <code>neko</code>
+    and you get a cat. It has terrible aerodynamics. That is the point.
+  </p>
+
+  <h2>What this is</h2>
+  <p>
+    It streams a flow past an airfoil and draws the speed field, the vorticity,
+    smoke streaklines and the lift/drag vectors while you turn the angle of
+    attack. Underneath is a Lattice-Boltzmann solver, so the wake, the separation
+    and the vortex street come out of the physics rather than being drawn on.
+    Press <kbd>E</kbd> and you can draw your own shape, cut a wing into wing plus
+    flap, and animate the control surfaces.
+  </p>
+  <p>
+    It is <strong>qualitative, not validated CFD</strong>. Lattice units stand in
+    for physical ones, so it gets the shape of the flow right and the actual
+    numbers wrong. Use it for intuition, not for sizing a real wing.
+  </p>
+
+  <h2>Files</h2>
+  <p>
+    A browser tab has no file dialog, so the two ends work differently here.
+    To load a scene, <strong>drag an <code>.afoil</code> or <code>.svg</code>
+    file onto the tunnel</strong>. To keep what you built, press
+    <strong>Save</strong> and the browser downloads the <code>.afoil</code>
+    wherever your downloads go. There is no Save As, because the browser picks
+    the destination.
+  </p>
+
+  <h2>The desktop version</h2>
+  <p>
+    This page is the whole simulator. The desktop build adds real open and save
+    dialogs, an SVG import menu, and a native menu bar.
+    <a href="https://github.com/crgimenes/kutta/releases/latest">Download it for
+    macOS, Windows or Linux</a>, or on macOS run
+    <code>brew install --cask crgimenes/tap/kutta</code>.
+  </p>
+
+  <footer>
+    <a href="https://github.com/crgimenes/kutta">Source on GitHub</a> ·
+    <a href="https://crg.eti.br">crg.eti.br</a> ·
+    Written in Go with <a href="https://ebitengine.org">Ebitengine</a>.
+  </footer>
+</main>
+</body>
+</html>

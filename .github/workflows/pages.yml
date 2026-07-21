@@ -1,0 +1,61 @@
+name: Pages
+
+on:
+  push:
+    branches:
+      - trunk
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one midway: a half-published site is
+# worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build WebAssembly
+        env:
+          GOARCH: wasm
+          GOOS: js
+        run: go build -trimpath -ldflags="-s -w" -o web/kutta.wasm .
+
+      # wasm_exec.js is the Go runtime shim and has to match the toolchain that
+      # produced the module, so it gets copied from this GOROOT rather than
+      # committed to the repo and left to drift.
+      - name: Copy the Go WebAssembly runtime
+        run: cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
