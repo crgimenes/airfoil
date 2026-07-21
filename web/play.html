@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kutta</title>
+<style>
+/* Ebitengine sizes its canvas from the window rather than from the parent
+   element, so it has to own a whole document. This page is that document: the
+   project page embeds it in an iframe, which makes the window and the embed box
+   the same shape and keeps the render free of stretching. */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: #e6e8ec;
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+#loader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .75rem;
+  text-align: center;
+  padding: 1rem;
+  background: #171a1f;
+  z-index: 10;
+}
+#loader.done { display: none; }
+#bar {
+  width: min(260px, 70%);
+  height: 3px;
+  background: #272c34;
+  border-radius: 2px;
+  overflow: hidden;
+}
+#bar::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: #5eb0ef;
+  animation: slide 1.1s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+#status { color: #9aa3af; font-size: .9rem; margin: 0; }
+#status b { color: #e6e8ec; font-weight: 600; font-variant-numeric: tabular-nums; }
+#hint { color: #6b7280; font-size: .8rem; margin: 0; }
+</style>
+</head>
+<body>
+<div id="loader">
+  <div id="bar"></div>
+  <p id="status">Loading the simulator<b></b></p>
+  <p id="hint">About 4 MB to download.</p>
+</div>
+
+<script src="wasm_exec.js"></script>
+<script>
+(function () {
+  const loader = document.getElementById("loader");
+  const status = document.getElementById("status");
+  const hint = document.getElementById("hint");
+  const counter = status.querySelector("b");
+
+  function fail(message) {
+    document.getElementById("bar").remove();
+    status.textContent = message;
+    hint.textContent = "";
+  }
+
+  if (typeof WebAssembly !== "object") {
+    fail("This browser has no WebAssembly support, so the simulator cannot run here.");
+    return;
+  }
+
+  // The counter reports decoded megabytes rather than a percentage. GitHub
+  // Pages gzips the module, so Content-Length is the compressed size while the
+  // stream read here is already decompressed: dividing one by the other reports
+  // well over 100%.
+  function withProgress(response) {
+    if (!response.body || typeof ReadableStream !== "function") {
+      return response;
+    }
+    let loaded = 0;
+    const stream = new ReadableStream({
+      start(controller) {
+        const reader = response.body.getReader();
+        function pump() {
+          return reader.read().then(({ done, value }) => {
+            if (done) {
+              controller.close();
+              return;
+            }
+            loaded += value.byteLength;
+            counter.textContent = " — " + (loaded / 1048576).toFixed(1) + " MB";
+            controller.enqueue(value);
+            return pump();
+          });
+        }
+        return pump().catch((err) => controller.error(err));
+      },
+    });
+    return new Response(stream, { headers: response.headers });
+  }
+
+  async function boot() {
+    const response = await fetch("kutta.wasm");
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status + " fetching kutta.wasm");
+    }
+    const go = new Go();
+    const result = await WebAssembly.instantiateStreaming(withProgress(response), go.importObject);
+
+    // Ebitengine appends its canvas on start, so the loader stays up until the
+    // canvas exists instead of uncovering an empty black page.
+    //
+    // The canvas is deliberately left unfocused. Focusing it here scrolls the
+    // embedding page down to the iframe on load, and it takes the arrow keys
+    // away from someone who is still reading. Clicking the tunnel focuses it.
+    const observer = new MutationObserver(() => {
+      const canvas = document.body.querySelector("canvas");
+      if (!canvas) {
+        return;
+      }
+      observer.disconnect();
+      loader.classList.add("done");
+    });
+    observer.observe(document.body, { childList: true });
+
+    go.run(result.instance);
+  }
+
+  boot().catch((err) => {
+    console.error(err);
+    fail("The simulator failed to load: " + err.message);
+  });
+})();
+</script>
+</body>
+</html>
