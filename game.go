@@ -159,11 +159,16 @@ type Game struct {
 	paused      bool
 	streamlines bool // overlay integrated streamlines
 	glow        bool // additive bloom on the smoke
-	// clean is kiosk mode: fullscreen, no menu/panels/editor, draw only the
-	// flow image. kioskControls keeps the AoA/speed/control sliders visible
-	// and usable (for a touch/mouse kiosk); without it, kiosk mode is the flow
-	// only.
+	// clean hides every panel/control, drawing only the flow image -- exactly
+	// what -hidecontrols has always meant, on its own. kiosk adds the rest of
+	// kiosk mode on top of that: a trimmed menu bar and blocking
+	// Escape/Open/Save/the shape editor, for an unattended public display.
+	// -hidecontrols alone sets only clean; -kiosk (via enterKiosk) sets both.
+	// kioskControls keeps the AoA/speed/control sliders visible and usable
+	// within kiosk mode (for a touch/mouse kiosk); without it, kiosk mode is
+	// the flow only. It's only meaningful together with kiosk.
 	clean         bool
+	kiosk         bool
 	kioskControls bool
 
 	// startFullscreen defers the -fullscreen flag until a few frames have been
@@ -527,7 +532,7 @@ func (g *Game) menuItems() []menu.Item {
 		{Title: "Loop +0.5s", Disabled: !inAnim, OnClick: act(func() { g.loopDelta(0.5) })},
 	}
 
-	if g.clean {
+	if g.kiosk {
 		// Locked down to just Quit and the way out, regardless of what the
 		// platform does with the menu bar itself in fullscreen.
 		return []menu.Item{
@@ -573,7 +578,7 @@ func (g *Game) menuSignature() string {
 	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v|%s|%v|%v|%v|%v",
 		g.editing, g.editMode, g.scn != nil, g.selObj >= 0, g.mode,
 		g.streamlines, g.glow, g.paused, g.snapOn, g.nacaCode,
-		g.objClip != nil, g.poseClipSet, g.clean, g.kioskControls)
+		g.objClip != nil, g.poseClipSet, g.kiosk, g.kioskControls)
 }
 
 // syncMenu rebuilds the native menu on the main thread when the context changed.
@@ -623,7 +628,7 @@ func (g *Game) Update() error {
 	}
 	// E toggles the editor, unless a text field is being typed into or a kiosk
 	// is running (kiosk mode never exposes the shape editor).
-	if inpututil.IsKeyJustPressed(ebiten.KeyE) && !g.side.HasFocus() && !g.gui.HasFocus() && !g.clean {
+	if inpututil.IsKeyJustPressed(ebiten.KeyE) && !g.side.HasFocus() && !g.gui.HasFocus() && !g.kiosk {
 		g.toggleEdit()
 	}
 	if g.editing {
@@ -798,13 +803,13 @@ func (g *Game) handleInput() {
 	}
 	// Escape/Open/Save all change what's loaded or touch the filesystem, so a
 	// kiosk -- unattended and public-facing -- blocks all three.
-	if !g.clean && inpututil.IsKeyJustPressed(ebiten.KeyEscape) && g.scn != nil {
+	if !g.kiosk && inpututil.IsKeyJustPressed(ebiten.KeyEscape) && g.scn != nil {
 		g.scn = nil
 		g.animPlaying = false
 		g.applyBody(true)
 	}
 	// O opens a scene file through the native dialog.
-	if !g.clean && inpututil.IsKeyJustPressed(ebiten.KeyO) {
+	if !g.kiosk && inpututil.IsKeyJustPressed(ebiten.KeyO) {
 		g.openSceneDialog()
 	}
 	// Angle of attack works in both modes: it pitches the foil, or the whole
@@ -826,7 +831,7 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyS) {
 		meta := ebiten.IsKeyPressed(ebiten.KeyMetaLeft) || ebiten.IsKeyPressed(ebiten.KeyMetaRight)
 		switch {
-		case meta && !g.clean:
+		case meta && !g.kiosk:
 			if ebiten.IsKeyPressed(ebiten.KeyShiftLeft) || ebiten.IsKeyPressed(ebiten.KeyShiftRight) {
 				g.saveSceneAs() // Cmd+Shift+S
 			} else {
