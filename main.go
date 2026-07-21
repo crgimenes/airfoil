@@ -16,6 +16,9 @@ const windowTitle = "kutta — 2D wind tunnel"
 
 func main() {
 	udpAddr := flag.String("udp", "", "listen address (e.g. :9000) for UDP slider control from external hardware; disabled if empty")
+	scenePath := flag.String("scene", "", "path to an .afoil scene file to load at startup instead of the interactive default foil")
+	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
+	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
 	flag.Parse()
 
 	ebiten.SetWindowSize(winW, winH)
@@ -24,6 +27,17 @@ func main() {
 	setWindowIcon()
 
 	g := NewGame()
+	g.clean = *hideControls
+	// Fullscreen is applied on the first Update, not here: entering fullscreen
+	// before the window exists leaves the first frame black on macOS until a
+	// resize. Deferring reproduces the toggle-after-launch path, which works.
+	g.startFullscreen = *fullscreen
+	if *scenePath != "" {
+		err := g.loadSceneFile(*scenePath)
+		if err != nil {
+			log.Printf("kutta: -scene %q: %v", *scenePath, err)
+		}
+	}
 	if *udpAddr != "" {
 		err := g.startUDPControl(*udpAddr)
 		if err != nil {

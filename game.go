@@ -38,7 +38,6 @@ const (
 	spdMin   = 0.02 // inlet speed range where the solver stays stable
 	spdMax   = 0.15
 
-	substeps    = 3    // solver steps per displayed frame
 	tracerSpeed = 5.0  // visual advection multiplier for smoke tracers
 	nParticles  = 3000 // dense enough to fill the whole tunnel, not just the centre
 
@@ -58,10 +57,11 @@ const (
 
 	aoaMin = -20 // sweep range of the live Cl-alpha plot, in degrees
 	aoaMax = 20
-	// aoaLimit is the full angle-of-attack range the control allows, well past
-	// the plot range so the foil can be turned broadside (90 deg) to the flow as
-	// a what-if. Beyond the linear region this is a qualitative demo, not data.
-	aoaLimit  = 90
+	// aoaLimit spans the slider: a full turn, so the foil can be put at any
+	// orientation (broadside, reversed, upside down) as a what-if. The angle
+	// wraps at +-180, so the arrow keys spin it continuously. Beyond the linear
+	// region this is a qualitative demo, not data.
+	aoaLimit  = 180
 	clPlotMin = -2.0 // Cl axis range of the plot
 	clPlotMax = 2.0
 
@@ -136,6 +136,8 @@ type Game struct {
 	sim   *lbm.Solver
 	smoke *viz.Particles
 
+	ptr pointer // this frame's pointer, mouse or finger; see pointer.go
+
 	profileIdx  int     // index into profiles for Tab-cycling presets
 	nacaCode    string  // active NACA 4-digit code (any code, not just a preset)
 	nacaInput   string  // NACA code being typed in the toolbar field
@@ -145,6 +147,14 @@ type Game struct {
 	paused      bool
 	streamlines bool // overlay integrated streamlines
 	glow        bool // additive bloom on the smoke
+	clean       bool // kiosk mode: draw only the flow image, hide every panel/control
+
+	// startFullscreen defers the -fullscreen flag until a few frames have been
+	// drawn: entering fullscreen during startup blanks the screen on macOS (it
+	// stays black until a resize), while toggling after launch works. The
+	// countdown waits out window creation, the first draws and the native menu.
+	startFullscreen bool
+	fsCountdown     int
 
 	outline []foil.Point // chord-normalized profile, regenerated on profile change
 
@@ -186,6 +196,15 @@ type Game struct {
 	dragStartX, dragStartY float64
 	dragLastX, dragLastY   float64
 	dragMoved              bool
+
+	// Trace backdrop: an optional translucent image shown under the editor
+	// canvas to draw over. It never reaches the solver or the saved scene; while
+	// backdropPosMode is on, canvas drag/wheel move and scale it instead of the
+	// camera. Mirrors linefire's mapeditor/backdrop.go.
+	backdrop                             *backdropImage
+	backdropPosMode                      bool
+	backdropDragging                     bool
+	backdropDragLastX, backdropDragLastY float64
 
 	// Editor sub-mode: GEOMETRY edits the base shape/pivot; ANIMATE scrubs the
 	// timeline and poses keyframes. editTime is the editor's scrub position
@@ -512,6 +531,14 @@ func (g *Game) syncMenu() {
 }
 
 func (g *Game) Update() error {
+	if g.startFullscreen {
+		g.fsCountdown++
+		if g.fsCountdown > 20 {
+			g.startFullscreen = false
+			ebiten.SetFullscreen(true)
+		}
+	}
+	g.ptr.sample()
 	g.syncMenu()
 	g.drainPending()
 	g.handleDroppedFiles()
@@ -643,9 +670,13 @@ func (g *Game) runSimToolbar() {
 	if g.gui.Button("st.save", "Save") {
 		g.saveScene()
 	}
-	g.gui.SameLine()
-	if g.gui.Button("st.saveas", "Save As") {
-		g.saveSceneAs()
+	// Save As picks a destination path, which a browser will not surrender, so
+	// the web build offers only Save and lets the browser file the download.
+	if !onWeb {
+		g.gui.SameLine()
+		if g.gui.Button("st.saveas", "Save As") {
+			g.saveSceneAs()
+		}
 	}
 	g.gui.SameLine()
 	if g.gui.Button("st.field", fieldName(g.mode)) {
@@ -670,11 +701,15 @@ func (g *Game) runSimToolbar() {
 }
 
 func (g *Game) handleInput() {
-	g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
-	// While typing in the NACA field, let it own the keyboard (sliders still work).
-	if g.gui.HasFocus() {
-		g.runSliders()
-		return
+	// Kiosk mode hides the toolbar and sliders but keeps the hotkeys live, so an
+	// operator (or a hardware controller over the keys) can still drive it.
+	if !g.clean {
+		g.runSimToolbar() // immediate-mode: build + handle the toolbar every frame
+		// While typing in the NACA field, let it own the keyboard (sliders work).
+		if g.gui.HasFocus() {
+			g.runSliders()
+			return
+		}
 	}
 	// L plays/pauses the timeline of an open scene. The fluid keeps simulating
 	// either way, so the surfaces can be frozen at any pose while the flow
@@ -739,7 +774,9 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyBracketLeft) {
 		g.setSpeed(g.u0 - 0.01)
 	}
-	g.runSliders()
+	if !g.clean {
+		g.runSliders()
+	}
 }
 
 // runSliders drives the bottom panel's draggable sliders (minigui): angle of
@@ -756,6 +793,23 @@ func (g *Game) runSliders() {
 		g.setSpeed(g.u0)
 	}
 	g.sliders.End()
+}
+
+// loadSceneFile loads path (e.g. the -scene startup flag) exactly as if it
+// had been chosen through the Open dialog, so Save afterward writes back to
+// the same file.
+func (g *Game) loadSceneFile(path string) error {
+	src, err := os.ReadFile(path) // #nosec G304 -- path comes from a command-line flag the user supplied
+	if err != nil {
+		return err
+	}
+	sc, err := sceneio.Load(string(src))
+	if err != nil {
+		return err
+	}
+	g.setScene(sc, path)
+	g.savePath = path
+	return nil
 }
 
 // openSceneDialog asks the OS for a scene file and loads it (paused at the
@@ -775,18 +829,11 @@ func (g *Game) openSceneDialog() {
 		g.noDialogHint()
 		return // cancelled, or unsupported platform
 	}
-	src, err := os.ReadFile(path) // #nosec G304 -- path chosen by the user via the native dialog
-	if err != nil {
+	// Same load path as the -scene flag: reads, parses, sets the scene and makes
+	// the opened file the target for a plain Save.
+	if err := g.loadSceneFile(path); err != nil {
 		g.sceneErr = err.Error()
-		return
 	}
-	sc, err := sceneio.Load(string(src))
-	if err != nil {
-		g.sceneErr = err.Error()
-		return
-	}
-	g.setScene(sc, path)
-	g.savePath = path // the file just opened is the natural target for plain Save
 }
 
 // setScene switches to a loaded scene, paused at t=0, and pushes its solid to the
@@ -815,6 +862,10 @@ func (g *Game) sceneToSave() *scene.Scene {
 // saveScene writes to the current file without prompting; with no current file
 // (nothing saved/opened yet) it falls back to Save As.
 func (g *Game) saveScene() {
+	if onWeb {
+		g.downloadScene()
+		return
+	}
 	if g.savePath == "" {
 		g.saveSceneAs()
 		return
@@ -829,6 +880,22 @@ func (g *Game) saveScene() {
 		g.sceneErr = err.Error()
 		return
 	}
+	g.sceneErr = ""
+}
+
+// downloadScene serializes the scene and hands it to the browser, which is what
+// saving means with no filesystem to write to.
+func (g *Game) downloadScene() {
+	text, err := sceneio.Save(g.sceneToSave())
+	if err != nil {
+		g.sceneErr = err.Error()
+		return
+	}
+	name := "untitled" + sceneio.Ext
+	if g.scenePath != "" {
+		name = filepath.Base(g.scenePath)
+	}
+	offerDownload(name, []byte(text))
 	g.sceneErr = ""
 }
 
@@ -870,7 +937,16 @@ func (g *Game) saveSceneAs() {
 // rotation each frame, so nothing else is needed here.
 func (g *Game) setAlpha(deg float64) {
 	g.simErr = ""
-	g.alphaDeg = math.Max(-aoaLimit, math.Min(aoaLimit, deg))
+	// Free rotation: wrap into (-180, 180] instead of clamping, so stepping
+	// past either end keeps spinning the foil the same way.
+	a := math.Mod(deg, 360)
+	if a > 180 {
+		a -= 360
+	}
+	if a <= -180 {
+		a += 360
+	}
+	g.alphaDeg = a
 	if g.scn == nil {
 		g.applyBody(false)
 		return
@@ -916,6 +992,13 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.drawMarkers(vp)
 	g.drawForces(vp)
+
+	// Kiosk mode stops here: only the flow image, no panels, toolbar, sliders or
+	// border. Layout already shrank the window to the viewport, so the flow
+	// fills it (and scales to fill the screen under -fullscreen).
+	if g.clean {
+		return
+	}
 
 	vector.StrokeRect(screen, 0, 0, simW, simH, 1, colSep, false)
 	g.drawSidePanel(screen)
@@ -1054,27 +1137,49 @@ func gridToScreenF(x, y float64) (float64, float64) {
 	return x * pixScale, (float64(gridH-1) - y) * pixScale
 }
 
-// drawOutline strokes the body edge(s) crisply on top of the blocky raster mask:
-// each scene object in scene mode, otherwise the single foil.
+// solidOutlineWidth and brokenOutlineWidth are the stroke widths drawOutline
+// uses for a rasterized (solid) body versus an unclosed reference-only one --
+// heavier, so a shape that never touches the flow still reads clearly on top
+// of the field.
+const (
+	solidOutlineWidth  = 1.5
+	brokenOutlineWidth = 5.0
+)
+
+// colBrokenOutline is the color drawOutline uses for an unclosed (reference-
+// only) object: solid white, brighter than the translucent white the
+// flow-interacting bodies use, so it reads as clearly distinct.
+var colBrokenOutline = color.RGBA{0xff, 0xff, 0xff, 0xff}
+
+// drawOutline strokes the body edge(s) crisply on top of the blocky raster
+// mask: each scene object in scene mode, otherwise the single foil. An
+// unclosed (broken) object never reaches the solver -- it is a reference
+// shape only -- so it is drawn heavier and brighter to read as visually
+// distinct from the solid, flow-interacting bodies.
 func (g *Game) drawOutline(dst *ebiten.Image) {
 	col := color.RGBA{0xff, 0xff, 0xff, 0xd0}
 	if g.scn != nil {
 		t := g.scn.LoopTime(g.animTime)
 		for _, o := range g.scn.Objects {
-			strokeClosed(dst, g.sceneGlobal(o.PolygonAt(t)), col)
+			poly := g.sceneGlobal(o.PolygonAt(t))
+			if o.Broken() {
+				strokeClosed(dst, poly, colBrokenOutline, brokenOutlineWidth)
+				continue
+			}
+			strokeClosed(dst, poly, col, solidOutlineWidth)
 		}
 		return
 	}
-	strokeClosed(dst, g.placedOutline(), col)
+	strokeClosed(dst, g.placedOutline(), col, solidOutlineWidth)
 }
 
-// strokeClosed outlines a closed polygon in viewport space.
-func strokeClosed(dst *ebiten.Image, poly []foil.Point, col color.Color) {
+// strokeClosed outlines a closed polygon in viewport space at the given width.
+func strokeClosed(dst *ebiten.Image, poly []foil.Point, col color.Color, width float32) {
 	for i := range poly {
 		j := (i + 1) % len(poly)
 		x0, y0 := gridToScreen(poly[i].X, poly[i].Y)
 		x1, y1 := gridToScreen(poly[j].X, poly[j].Y)
-		vector.StrokeLine(dst, x0, y0, x1, y1, 1.5, col, true)
+		vector.StrokeLine(dst, x0, y0, x1, y1, width, col, true)
 	}
 }
 
@@ -1482,5 +1587,8 @@ func drawString(dst *ebiten.Image, s string, x, y float64, clr color.Color) {
 
 // Layout fixes the logical resolution to the window size.
 func (g *Game) Layout(_, _ int) (int, int) {
+	if g.clean {
+		return simW, simH // kiosk: the flow fills the window, no panels
+	}
 	return winW, winH
 }

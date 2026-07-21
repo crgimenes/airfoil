@@ -19,6 +19,10 @@ import (
 // drag-and-drop path that works instead. On macOS an empty result is the user
 // cancelling, which deserves silence.
 func (g *Game) noDialogHint() {
+	if onWeb {
+		g.sceneErr = "drop an .afoil or .svg file onto the tunnel to load it"
+		return
+	}
 	if runtime.GOOS != "darwin" {
 		g.sceneErr = "no file dialog on this OS yet — drop the file onto the window instead"
 	}
