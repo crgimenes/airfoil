@@ -98,12 +98,10 @@ func writeSpeedPNG(path string, s *lbm.Solver) {
 	for y := range ny {
 		row := ny - 1 - y
 		for x := range nx {
-			var c color.RGBA
+			sp := math.Hypot(s.Ux[y*nx+x], s.Uy[y*nx+x])
+			c := viz.Speed(sp / (u0 * 2))
 			if s.Solid(x, y) {
 				c = color.RGBA{0x1a, 0x1d, 0x24, 0xff}
-			} else {
-				sp := math.Hypot(s.Ux[y*nx+x], s.Uy[y*nx+x])
-				c = viz.Speed(sp / (u0 * 2))
 			}
 			img.Set(x, row, c)
 		}

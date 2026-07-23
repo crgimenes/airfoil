@@ -51,7 +51,7 @@ func TestSVGSource(t *testing.T) {
 	}
 	// Subpath 1 spans x 0.8..1.0: grid x 90..110 with the same placement, so
 	// the two objects keep their drawn separation.
-	var minX float64 = math.Inf(1)
+	var minX = math.Inf(1)
 	for _, p := range s.Objects[1].Shape {
 		minX = math.Min(minX, p.X)
 	}

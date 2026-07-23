@@ -35,11 +35,9 @@ func Vorticity(v, scale float64) color.RGBA {
 	t := clampSym(v / scale) // -1..1
 	mag := math.Abs(t)
 	base := color.RGBA{0x08, 0x0a, 0x12, 0xff}
-	var tip color.RGBA
+	tip := color.RGBA{0x30, 0x90, 0xff, 0xff} // clockwise spin reads cool blue
 	if t >= 0 {
-		tip = color.RGBA{0xff, 0x60, 0x30, 0xff}
-	} else {
-		tip = color.RGBA{0x30, 0x90, 0xff, 0xff}
+		tip = color.RGBA{0xff, 0x60, 0x30, 0xff} // counter-clockwise reads warm
 	}
 	return lerpColor(base, tip, mag)
 }

@@ -316,10 +316,9 @@ func (s *Solver) computeForce() {
 		mz += fc.px*dfy - fc.py*dfx
 	}
 	s.Fx, s.Fy, s.Mz = fx, fy, mz
+	s.Sep = 0
 	if len(s.faces) > 0 {
 		s.Sep = float64(rev) / float64(len(s.faces))
-	} else {
-		s.Sep = 0
 	}
 }
 

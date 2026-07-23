@@ -1033,7 +1033,8 @@ func (g *Game) openSceneDialog() {
 	}
 	// Same load path as the -scene flag: reads, parses, sets the scene and makes
 	// the opened file the target for a plain Save.
-	if err := g.loadSceneFile(path); err != nil {
+	err := g.loadSceneFile(path)
+	if err != nil {
 		g.sceneErr = err.Error()
 	}
 }

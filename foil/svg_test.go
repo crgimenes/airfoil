@@ -94,7 +94,7 @@ func TestParseSVGCubic(t *testing.T) {
 	if len(pts) < 10 {
 		t.Fatalf("cubic should flatten to many points, got %d", len(pts))
 	}
-	var maxY float64 = math.Inf(-1)
+	var maxY = math.Inf(-1)
 	for _, p := range pts {
 		maxY = math.Max(maxY, p.Y)
 	}
@@ -116,7 +116,7 @@ func TestParseSVGQuadratic(t *testing.T) {
 	if len(pts) < 10 {
 		t.Fatalf("quadratic should flatten to many points, got %d", len(pts))
 	}
-	var maxY float64 = math.Inf(-1)
+	var maxY = math.Inf(-1)
 	for _, p := range pts {
 		maxY = math.Max(maxY, p.Y)
 	}
@@ -170,7 +170,7 @@ func TestParseSVGBasicShapes(t *testing.T) {
 			t.Errorf("%s: got %+v", c.name, outlines)
 			continue
 		}
-		var minX, maxX float64 = math.Inf(1), math.Inf(-1)
+		var minX, maxX = math.Inf(1), math.Inf(-1)
 		for _, p := range outlines[0] {
 			minX = math.Min(minX, p.X)
 			maxX = math.Max(maxX, p.X)

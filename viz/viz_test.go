@@ -10,12 +10,14 @@ import (
 // must swallow non-finite input and return a valid color.
 func TestColormapsNaNSafe(t *testing.T) {
 	nan := math.NaN()
-	if got := Speed(nan); got != speedStops[0] {
+	got := Speed(nan)
+	if got != speedStops[0] {
 		t.Errorf("Speed(NaN) = %+v, want first stop", got)
 	}
 	Vorticity(nan, 1) // must not panic
 	Pressure(nan, 1)  // must not panic
-	if got := Speed(math.Inf(1)); got != speedStops[len(speedStops)-1] {
+	got = Speed(math.Inf(1))
+	if got != speedStops[len(speedStops)-1] {
 		t.Errorf("Speed(+Inf) = %+v, want last stop", got)
 	}
 }

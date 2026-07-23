@@ -60,7 +60,8 @@ func collectShapes(data []byte) ([][]Point, error) {
 		if err != nil {
 			return nil, fmt.Errorf("foil: svg: %w", err)
 		}
-		if _, ok := tok.(xml.EndElement); ok {
+		_, isEnd := tok.(xml.EndElement)
+		if isEnd {
 			if len(hidden) > 0 {
 				hidden = hidden[:len(hidden)-1]
 			}

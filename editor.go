@@ -1012,11 +1012,11 @@ func deleteVertexBreak(o *scene.Object, i int) {
 		if hasH {
 			nh = append(nh, o.Handle[k])
 		}
+		gap := og[k]
 		if k == prev {
-			ng = append(ng, true) // the merged edge becomes the new gap
-		} else {
-			ng = append(ng, og[k])
+			gap = true // the merged edge becomes the new gap
 		}
+		ng = append(ng, gap)
 	}
 	o.Shape = ns
 	o.Handle = nh
