@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"math"
 	"path/filepath"
+	"slices"
 
 	ui "github.com/crgimenes/minigui"
 	"github.com/hajimehoshi/ebiten/v2"
@@ -115,7 +116,9 @@ func (g *Game) toggleEdit() {
 		return
 	}
 	if g.scn == nil {
-		out := g.placedOutline()
+		// A copy, not the placedOutline cache itself: the editor mutates
+		// Shape in place, and the cache must stay pristine.
+		out := slices.Clone(g.placedOutline())
 		g.scn = &scene.Scene{Objects: []*scene.Object{{Name: "airfoil", Shape: out, Pivot: centroid(out)}}}
 		g.scenePath = "(from foil)"
 	}

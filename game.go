@@ -147,6 +147,26 @@ type Game struct {
 	sim   *lbm.Solver
 	smoke *viz.Particles
 
+	perf perfLog // -debug terminal metrics; see perflog.go
+
+	// Scratch storage for the per-frame body rebuild (mask rasterization and
+	// scene polygon transforms). Reused serially within a frame, never held
+	// across one; keeps an animated scene at zero allocations after warm-up.
+	maskBuf []bool
+	outBuf  []foil.Point // flattened outline
+	posBuf  []foil.Point // posed outline
+	glbBuf  []foil.Point // outline after the global angle-of-attack rotation
+
+	// placedOutline cache; see that function.
+	placedCache []foil.Point
+	placedAlpha float64
+	placedValid bool
+
+	// smokeVtx and smokeIdx are the persistent vertex/index buffers behind the
+	// tracer stamps, so the whole cloud is one DrawTriangles call.
+	smokeVtx []ebiten.Vertex
+	smokeIdx []uint32
+
 	ptr pointer // this frame's pointer, mouse or finger; see pointer.go
 
 	profileIdx  int     // index into profiles for Tab-cycling presets
@@ -263,10 +283,11 @@ type Game struct {
 	// Native menu bar (glaze/menu). Menu clicks fire on the main thread; they
 	// enqueue actions here to run on the game (Update) goroutine, avoiding races.
 	// The menu is rebuilt only when menuSig (the context) changes.
-	menuSig string
-	quit    bool
-	pendMu  sync.Mutex
-	pending []func()
+	menuSig    menuSig
+	menuSigSet bool
+	quit       bool
+	pendMu     sync.Mutex
+	pending    []func()
 
 	// Pen draw tool: while drawing, each press places an anchor and the drag
 	// until release becomes its Bezier tangent (click = corner). draftPts are the
@@ -337,7 +358,9 @@ func (g *Game) applyBody(reset bool) {
 		out, _ = foil.NACA4("0012", 80) // stay safe on a bad code
 	}
 	g.outline = out
-	mask := foil.Rasterize(g.placedOutline(), gridW, gridH)
+	g.placedValid = false // the outline changed under the placed cache
+	mask := g.scratchMask()
+	foil.RasterizeInto(mask, g.placedOutline(), gridW, gridH)
 	if reset {
 		g.sim.SetSolid(mask)
 		return
@@ -383,12 +406,21 @@ func (g *Game) pivot() (x, y float64) {
 	return leadXFrac*gridW + pivotFrac*chord, float64(gridH) / 2
 }
 
-// placedOutline returns the profile in grid coordinates for the current AoA.
+// placedOutline returns the profile in grid coordinates for the current AoA,
+// cached until the angle or the profile changes (a slider drag re-requests it
+// several times per frame). A cache miss allocates a fresh slice, so an old
+// result held by a caller stays valid; callers must not mutate the result.
 func (g *Game) placedOutline() []foil.Point {
+	if g.placedValid && g.placedAlpha == g.alphaDeg {
+		return g.placedCache
+	}
 	chord := chordFrac * gridW
 	px, py := g.pivot()
 	alpha := g.alphaDeg * math.Pi / 180
-	return foil.Place(g.outline, chord, px, py, alpha, pivotFrac)
+	g.placedCache = foil.Place(g.outline, chord, px, py, alpha, pivotFrac)
+	g.placedAlpha = g.alphaDeg
+	g.placedValid = true
+	return g.placedCache
 }
 
 // sceneGlobal applies the angle of attack as a nose-up rotation of the whole
@@ -402,16 +434,48 @@ func (g *Game) sceneGlobal(poly []foil.Point) []foil.Point {
 }
 
 // sceneMask rasterizes the union of all scene objects at time t, with the global
-// angle of attack applied.
+// angle of attack applied. The returned mask is the Game's scratch buffer,
+// valid until the next sceneMask or applyBody call; both solver entry points
+// (SetSolid, UpdateSolid) copy it immediately.
 func (g *Game) sceneMask(t float64) []bool {
-	mask := make([]bool, gridW*gridH)
+	mask := g.scratchMask()
 	for _, o := range g.scn.Objects {
 		if o.Broken() {
 			continue // a cut outline is not a solid until it is closed
 		}
-		foil.RasterizeInto(mask, g.sceneGlobal(g.objectPolygon(o, t)), gridW, gridH)
+		foil.RasterizeInto(mask, g.sceneGlobalInto(g.objectPolygonInto(o, t)), gridW, gridH)
 	}
 	return mask
+}
+
+// scratchMask returns the shared mask buffer, cleared.
+func (g *Game) scratchMask() []bool {
+	if g.maskBuf == nil {
+		g.maskBuf = make([]bool, gridW*gridH)
+	}
+	clear(g.maskBuf)
+	return g.maskBuf
+}
+
+// sceneGlobalInto is sceneGlobal writing into the Game's scratch buffer.
+func (g *Game) sceneGlobalInto(poly []foil.Point) []foil.Point {
+	if g.alphaDeg == 0 {
+		return poly
+	}
+	px, py := g.pivot()
+	g.glbBuf = scene.ApplyInto(g.glbBuf[:0], poly, foil.Point{X: px, Y: py}, scene.Pose{Rot: -g.alphaDeg, Scale: 1})
+	return g.glbBuf
+}
+
+// objectPolygonInto is objectPolygon using the Game's scratch buffers; see
+// objectPolygon for the Control semantics.
+func (g *Game) objectPolygonInto(o *scene.Object, t float64) []foil.Point {
+	if o.Control {
+		g.posBuf = scene.ApplyInto(g.posBuf[:0], o.OutlineInto(g.outBuf), o.Pivot, scene.Pose{Rot: g.controlDeg, Scale: 1})
+		return g.posBuf
+	}
+	g.posBuf = o.PolygonAtInto(g.posBuf, g.outBuf, t)
+	return g.posBuf
 }
 
 // objectPolygon resolves an object's posed outline: the live control-surface
@@ -572,19 +636,51 @@ func (g *Game) menuItems() []menu.Item {
 	}
 }
 
+// menuSig captures the context the menu depends on. It is a plain comparable
+// struct rather than a formatted string so checking it every Update costs a
+// comparison, not an allocation.
+type menuSig struct {
+	editing       bool
+	editMode      int
+	hasScene      bool
+	hasSelection  bool
+	mode          fieldMode
+	streamlines   bool
+	glow          bool
+	paused        bool
+	snapOn        bool
+	nacaCode      string
+	hasClip       bool
+	poseClipSet   bool
+	kiosk         bool
+	kioskControls bool
+}
+
 // menuSignature captures the context the menu depends on; the menu is rebuilt
 // only when it changes (not every frame).
-func (g *Game) menuSignature() string {
-	return fmt.Sprintf("%v|%v|%v|%v|%v|%v|%v|%v|%v|%s|%v|%v|%v|%v",
-		g.editing, g.editMode, g.scn != nil, g.selObj >= 0, g.mode,
-		g.streamlines, g.glow, g.paused, g.snapOn, g.nacaCode,
-		g.objClip != nil, g.poseClipSet, g.kiosk, g.kioskControls)
+func (g *Game) menuSignature() menuSig {
+	return menuSig{
+		editing:       g.editing,
+		editMode:      int(g.editMode),
+		hasScene:      g.scn != nil,
+		hasSelection:  g.selObj >= 0,
+		mode:          g.mode,
+		streamlines:   g.streamlines,
+		glow:          g.glow,
+		paused:        g.paused,
+		snapOn:        g.snapOn,
+		nacaCode:      g.nacaCode,
+		hasClip:       g.objClip != nil,
+		poseClipSet:   g.poseClipSet,
+		kiosk:         g.kiosk,
+		kioskControls: g.kioskControls,
+	}
 }
 
 // syncMenu rebuilds the native menu on the main thread when the context changed.
 func (g *Game) syncMenu() {
 	sig := g.menuSignature()
-	if sig == g.menuSig {
+	if g.menuSigSet && sig == g.menuSig {
 		return
 	}
 	items := g.menuItems()
@@ -600,9 +696,15 @@ func (g *Game) syncMenu() {
 		return // the window is not up yet; retry next frame with a real handle
 	}
 	g.menuSig = sig // set, or unsupported here (Linux): either way, done
+	g.menuSigSet = true
 }
 
 func (g *Game) Update() error {
+	updT0 := g.perf.now()
+	defer func() {
+		g.perf.add(&g.perf.upd, updT0)
+		g.perf.tick()
+	}()
 	if g.startFullscreen {
 		g.fsCountdown++
 		if g.fsCountdown > 20 {
@@ -677,12 +779,15 @@ func (g *Game) Update() error {
 // used to panic on it). Both stepping sites — the frame loop and the N
 // single-step — must go through here.
 func (g *Game) stepSim(n int) {
+	t0 := g.perf.now()
 	for range n {
 		g.sim.Step()
 	}
+	g.perf.add(&g.perf.solver, t0)
 	if g.sim.Finite() {
 		return
 	}
+	g.perf.eventf("instability_reset")
 	g.resetUnstableFlow()
 }
 
@@ -936,6 +1041,7 @@ func (g *Game) openSceneDialog() {
 // setScene switches to a loaded scene, paused at t=0, and pushes its solid to the
 // solver. It clears the save target (callers that opened a file set it after).
 func (g *Game) setScene(sc *scene.Scene, path string) {
+	g.perf.eventf("scene_load path=%q objects=%d", path, len(sc.Objects))
 	g.scn = sc
 	g.scenePath = path
 	g.savePath = ""
@@ -1082,6 +1188,8 @@ func (g *Game) setSpeed(u float64) {
 // Draw paints the clipped simulation viewport and the two information panels —
 // or the editor, when in edit mode.
 func (g *Game) Draw(screen *ebiten.Image) {
+	drawT0 := g.perf.now()
+	defer g.perf.add(&g.perf.draw, drawT0)
 	if g.editing {
 		g.drawEditor(screen)
 		return
@@ -1130,6 +1238,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 // paintField fills the reusable pixel buffer from the chosen scalar field. Grid
 // row 0 is the bottom in physics coordinates, so it maps to the bottom image row.
 func (g *Game) paintField() {
+	t0 := g.perf.now()
+	defer g.perf.add(&g.perf.field, t0)
 	for y := range gridH {
 		row := gridH - 1 - y
 		for x := range gridW {
@@ -1169,28 +1279,56 @@ func (g *Game) cp(c int) float64 {
 // drawSmoke fades the trail layer, stamps each tracer onto it, then adds the
 // whole layer over the field so streaklines glow like real smoke.
 func (g *Game) drawSmoke(dst *ebiten.Image) {
+	t0 := g.perf.now()
+	defer g.perf.add(&g.perf.smoke, t0)
 	fade := &ebiten.DrawImageOptions{}
 	fade.GeoM.Scale(float64(simW), float64(simH))
 	g.trailImg.DrawImage(g.fadeImg, fade)
 
 	// Tint each tracer by the local flow speed (blue slow -> red fast), so the
 	// smoke reads as a speed field even over the vorticity/pressure background.
+	// The speed comes from the advection sample Particles.Step already took,
+	// half a step behind the drawn position: invisible on a smooth field, and
+	// it halves the interpolation work.
+	//
+	// The whole cloud is one DrawTriangles over persistent buffers. A
+	// DrawImage per tracer costs four small allocations inside Ebitengine, and
+	// at three thousand tracers that alone was most of the frame's garbage.
+	// With straight-alpha vertex colors, (r, g, b, 0.85) multiplies the white
+	// dot exactly like the ColorScale the per-tracer path used, so the pixels
+	// are unchanged.
 	inv := 0.0
 	if g.u0 > 0 {
 		inv = 1 / (2 * g.u0)
 	}
+	n := len(g.smoke.X)
+	if cap(g.smokeVtx) < 4*n {
+		g.smokeVtx = make([]ebiten.Vertex, 4*n)
+		g.smokeIdx = make([]uint32, 0, 6*n)
+		for q := range uint32(n) { // #nosec G115 -- n is the tracer count (3000), nowhere near uint32 range
+			v := q * 4
+			g.smokeIdx = append(g.smokeIdx, v, v+1, v+2, v+1, v+3, v+2)
+		}
+	}
+	vtx := g.smokeVtx[:0]
 	for i := range g.smoke.X {
 		x, y := g.smoke.X[i], g.smoke.Y[i]
-		ux, uy := g.sim.VelocityAt(x, y)
-		col := viz.Speed(math.Min(1, math.Hypot(ux, uy)*inv))
-		sx := x * pixScale
-		sy := (float64(gridH-1) - y) * pixScale
-		op := &ebiten.DrawImageOptions{}
-		op.GeoM.Translate(sx, sy)
-		op.ColorScale.ScaleWithColor(col)
-		op.ColorScale.ScaleAlpha(0.85)
-		g.trailImg.DrawImage(g.dotImg, op)
+		col := viz.Speed(math.Min(1, g.smoke.Spd[i]*inv))
+		sx := float32(x * pixScale)
+		sy := float32((float64(gridH-1) - y) * pixScale)
+		r := float32(col.R) / 255
+		gr := float32(col.G) / 255
+		b := float32(col.B) / 255
+		const a = 0.85
+		vtx = append(vtx,
+			ebiten.Vertex{DstX: sx, DstY: sy, SrcX: 0, SrcY: 0, ColorR: r, ColorG: gr, ColorB: b, ColorA: a},
+			ebiten.Vertex{DstX: sx + 2, DstY: sy, SrcX: 2, SrcY: 0, ColorR: r, ColorG: gr, ColorB: b, ColorA: a},
+			ebiten.Vertex{DstX: sx, DstY: sy + 2, SrcX: 0, SrcY: 2, ColorR: r, ColorG: gr, ColorB: b, ColorA: a},
+			ebiten.Vertex{DstX: sx + 2, DstY: sy + 2, SrcX: 2, SrcY: 2, ColorR: r, ColorG: gr, ColorB: b, ColorA: a},
+		)
 	}
+	top := &ebiten.DrawTrianglesOptions{}
+	g.trailImg.DrawTriangles32(vtx, g.smokeIdx[:6*n], g.dotImg, top)
 
 	add := &ebiten.DrawImageOptions{}
 	add.Blend = ebiten.BlendLighter
@@ -1295,12 +1433,23 @@ func (g *Game) drawOutline(dst *ebiten.Image) {
 
 // strokeClosed outlines a closed polygon in viewport space at the given width.
 func strokeClosed(dst *ebiten.Image, poly []foil.Point, col color.Color, width float32) {
-	for i := range poly {
-		j := (i + 1) % len(poly)
-		x0, y0 := gridToScreen(poly[i].X, poly[i].Y)
-		x1, y1 := gridToScreen(poly[j].X, poly[j].Y)
-		vector.StrokeLine(dst, x0, y0, x1, y1, width, col, true)
+	if len(poly) == 0 {
+		return
 	}
+	// One batched path instead of a StrokeLine per segment: a single stroke
+	// tessellation and draw, and round joins land on the shared vertices.
+	var path vector.Path
+	x0, y0 := gridToScreen(poly[0].X, poly[0].Y)
+	path.MoveTo(x0, y0)
+	for i := 1; i < len(poly); i++ {
+		x, y := gridToScreen(poly[i].X, poly[i].Y)
+		path.LineTo(x, y)
+	}
+	path.Close()
+	op := &vector.StrokeOptions{Width: width, LineJoin: vector.LineJoinRound}
+	dop := &vector.DrawPathOptions{AntiAlias: true}
+	dop.ColorScale.ScaleWithColor(col)
+	vector.StrokePath(dst, &path, op, dop)
 }
 
 // drawSurfacePressure draws a little arrow along each stretch of the body

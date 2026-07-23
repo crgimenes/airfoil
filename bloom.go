@@ -36,6 +36,11 @@ func loadBlurShader() *ebiten.Shader {
 type bloom struct {
 	w, h int
 	a, b *ebiten.Image
+
+	// uniforms and dir persist across passes so a blur costs no allocation;
+	// only the direction values change per pass.
+	uniforms map[string]any
+	dir      []float32
 }
 
 func (bl *bloom) ensure(w, h int) {
@@ -73,8 +78,13 @@ func (bl *bloom) apply(dst, src *ebiten.Image, spread float64, iters int, gain f
 // blur runs one separable Gaussian pass from src into dst along (dx, dy) pixels.
 func (bl *bloom) blur(dst, src *ebiten.Image, shader *ebiten.Shader, dx, dy float64) {
 	dst.Clear()
+	if bl.uniforms == nil {
+		bl.dir = make([]float32, 2)
+		bl.uniforms = map[string]any{"Direction": bl.dir}
+	}
+	bl.dir[0], bl.dir[1] = float32(dx), float32(dy)
 	op := &ebiten.DrawRectShaderOptions{}
 	op.Images[0] = src
-	op.Uniforms = map[string]any{"Direction": []float32{float32(dx), float32(dy)}}
+	op.Uniforms = bl.uniforms
 	dst.DrawRectShader(bl.w, bl.h, shader, op)
 }

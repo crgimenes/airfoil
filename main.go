@@ -21,6 +21,7 @@ func main() {
 	streamlines := flag.Bool("streamlines", false, "overlay integrated streamlines")
 	mode := flag.String("mode", "", "field display at startup: speed, vorticity, or pressure (default speed)")
 	udpAddr := flag.String("udp", "", "listen address (e.g. :9000) for UDP slider control from external hardware; disabled if empty")
+	debug := flag.Bool("debug", false, "log per-second performance lines and events to the terminal")
 	scenePath := flag.String("scene", "", "path to an .afoil scene file to load at startup instead of the interactive default foil")
 	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
 	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
@@ -32,6 +33,7 @@ func main() {
 	setWindowIcon()
 
 	g := NewGame()
+	g.perf.enabled = *debug
 	g.glow = *glow
 	g.streamlines = *streamlines
 	if *mode != "" {

@@ -156,6 +156,16 @@ func (o *Object) Outline() []foil.Point {
 	return flattenClosed(o.Shape, o.Handle)
 }
 
+// OutlineInto is Outline flattening into dst's storage, for callers that redo
+// it every frame (the simulator's mask rebuild) and want no allocation after
+// warm-up. Without handles it returns Shape directly, exactly like Outline.
+func (o *Object) OutlineInto(dst []foil.Point) []foil.Point {
+	if !o.HasHandles() {
+		return o.Shape
+	}
+	return flattenClosedInto(dst[:0], o.Shape, o.Handle)
+}
+
 // AutoSmooth fills Handle with Catmull-Rom-equivalent tangents so the outline
 // becomes smooth through every anchor (handle i = (P[i+1]-P[i-1])/6).
 func (o *Object) AutoSmooth() {
@@ -180,7 +190,13 @@ func flattenClosed(anchor, handle []foil.Point) []foil.Point {
 	if n < 2 {
 		return anchor
 	}
-	out := make([]foil.Point, 0, n*bezSeg)
+	return flattenClosedInto(make([]foil.Point, 0, n*bezSeg), anchor, handle)
+}
+
+// flattenClosedInto is flattenClosed appending into out, so a per-frame caller
+// can reuse one buffer.
+func flattenClosedInto(out, anchor, handle []foil.Point) []foil.Point {
+	n := len(anchor)
 	for i := range n {
 		j := (i + 1) % n
 		p0, p3 := anchor[i], anchor[j]
@@ -264,6 +280,14 @@ func (o *Object) PolygonAt(t float64) []foil.Point {
 	return Apply(o.Outline(), o.Pivot, o.PoseAt(t))
 }
 
+// PolygonAtInto is PolygonAt with caller-owned storage: outline holds the
+// flattened shape and dst the posed result. Neither escapes; the returned
+// slice aliases dst (or Shape when the pose is at rest and there is nothing to
+// transform -- the same aliasing Outline itself does).
+func (o *Object) PolygonAtInto(dst, outline []foil.Point, t float64) []foil.Point {
+	return ApplyInto(dst[:0], o.OutlineInto(outline), o.Pivot, o.PoseAt(t))
+}
+
 // keyEps treats two key times within this distance as the same keyframe.
 const keyEps = 1e-6
 
@@ -294,16 +318,21 @@ func (o *Object) DeleteKey(t float64) bool {
 
 // Apply transforms pts by pose p: scale and rotate about pivot, then translate.
 func Apply(pts []foil.Point, pivot foil.Point, p Pose) []foil.Point {
+	return ApplyInto(make([]foil.Point, 0, len(pts)), pts, pivot, p)
+}
+
+// ApplyInto is Apply appending into dst, so a per-frame caller can reuse one
+// buffer instead of allocating per transform.
+func ApplyInto(dst, pts []foil.Point, pivot foil.Point, p Pose) []foil.Point {
 	sin, cos := math.Sincos(p.Rot * math.Pi / 180)
-	out := make([]foil.Point, len(pts))
-	for i, q := range pts {
+	for _, q := range pts {
 		x := (q.X - pivot.X) * p.Scale
 		y := (q.Y - pivot.Y) * p.Scale
 		rx := x*cos - y*sin
 		ry := x*sin + y*cos
-		out[i] = foil.Point{X: pivot.X + rx + p.DX, Y: pivot.Y + ry + p.DY}
+		dst = append(dst, foil.Point{X: pivot.X + rx + p.DX, Y: pivot.Y + ry + p.DY})
 	}
-	return out
+	return dst
 }
 
 // Scene is a set of objects plus a loop length in seconds.

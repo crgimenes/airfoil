@@ -18,9 +18,12 @@ type Field interface {
 // the smoke ribbons in a real tunnel.
 type Particles struct {
 	X, Y []float64
-	nx   int
-	ny   int
-	rng  *rand.Rand
+	// Spd is each tracer's flow speed from the advection sample of the last
+	// Step, so the renderer can tint without re-interpolating the field.
+	Spd []float64
+	nx  int
+	ny  int
+	rng *rand.Rand
 }
 
 // NewParticles builds count tracers for an nx×ny grid. seed fixes the RNG so
@@ -29,6 +32,7 @@ func NewParticles(count, nx, ny int, seed int64) *Particles {
 	p := &Particles{
 		X:   make([]float64, count),
 		Y:   make([]float64, count),
+		Spd: make([]float64, count),
 		nx:  nx,
 		ny:  ny,
 		rng: rand.New(rand.NewSource(seed)), // #nosec G404 -- cosmetic seeding, not security
@@ -53,6 +57,7 @@ func (p *Particles) Step(f Field, dt float64) {
 		ux, uy := f.VelocityAt(p.X[i], p.Y[i])
 		p.X[i] += ux * dt
 		p.Y[i] += uy * dt
+		p.Spd[i] = math.Sqrt(ux*ux + uy*uy)
 		if p.recycle(f, i, ux, uy) {
 			p.respawn(f, i)
 		}

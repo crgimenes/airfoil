@@ -43,6 +43,12 @@ const (
 type Solver struct {
 	NX, NY int
 
+	// Workers caps the goroutines the native build spreads collide and stream
+	// across; 0 means one per available CPU. The browser build is always
+	// serial. Any value produces bit-identical results, since both phases
+	// write each cell from that cell's own inputs.
+	Workers int
+
 	omega float64 // BGK relaxation rate, 1/tau
 	u0    float64 // free-stream speed in lattice units, along +x
 
@@ -64,6 +70,24 @@ type Solver struct {
 	// it near zero; a separation bubble (post-stall) drives it up, so it serves as
 	// a qualitative stall indicator independent of the lift curve.
 	Sep float64
+
+	// faces caches the body's exposed faces so computeForce visits only the
+	// surface instead of sweeping the grid four times per step. Rebuilt whenever
+	// the solid mask changes, in the same j,y,x order as the sweep it replaced,
+	// so the floating-point sums come out bit-identical.
+	faces []face
+
+	// faceBins are per-direction scratch lists that let rebuildFaces scan the
+	// grid once while still emitting the list in j-major order. An animated
+	// scene rebuilds every frame, so the scan count matters.
+	faceBins [4][]face
+}
+
+// face is one exposed body face: a fluid cell whose axial neighbor is solid.
+type face struct {
+	c      int     // fluid cell index
+	ex, ey float64 // face direction, pointing into the body
+	px, py float64 // face midpoint, the moment arm for Mz
 }
 
 // New builds a solver of the given size. tau is the BGK relaxation time
@@ -108,6 +132,7 @@ func (s *Solver) Reset() {
 // look wrong.
 func (s *Solver) SetSolid(mask []bool) {
 	copy(s.solid, mask)
+	s.rebuildFaces()
 	s.Reset()
 }
 
@@ -124,6 +149,7 @@ func (s *Solver) UpdateSolid(mask []bool) {
 		}
 		s.solid[c] = mask[c]
 	}
+	s.rebuildFaces()
 }
 
 // SetInletSpeed changes the free-stream speed in place. The boundaries pick up
@@ -176,7 +202,15 @@ func (s *Solver) Step() {
 // collide relaxes every fluid cell toward local equilibrium (BGK) and refreshes
 // the macroscopic fields in place. Solid cells are skipped and report no flow.
 func (s *Solver) collide() {
-	for c := 0; c < len(s.Rho); c++ {
+	s.forRows(s.NY, func(y0, y1 int) {
+		s.collideRange(y0*s.NX, y1*s.NX)
+	})
+}
+
+// collideRange is collide over the cell range [c0, c1), the unit forRows
+// hands to each worker.
+func (s *Solver) collideRange(c0, c1 int) {
+	for c := c0; c < c1; c++ {
 		if s.solid[c] {
 			s.Rho[c], s.Ux[c], s.Uy[c] = 1, 0, 0
 			continue
@@ -211,8 +245,15 @@ func (s *Solver) collide() {
 			uy *= k
 		}
 		s.Rho[c], s.Ux[c], s.Uy[c] = rho, ux, uy
+		// The equilibrium's 1 - 1.5*u^2 term is the same for all nine
+		// directions, so it is computed once here instead of inside feq nine
+		// times. Same math, fewer multiplies; forces stay within the physics
+		// tolerances (the reassociation shifts the last bits only).
+		base := 1 - 1.5*(ux*ux+uy*uy)
+		wrho := rho * s.omega
 		for i := range 9 {
-			s.f[i][c] += s.omega * (feq(i, rho, ux, uy) - s.f[i][c])
+			cu := exf[i]*ux + eyf[i]*uy
+			s.f[i][c] += wrho*w[i]*(base+3*cu+4.5*cu*cu) - s.omega*s.f[i][c]
 		}
 	}
 }
@@ -222,10 +263,16 @@ func (s *Solver) collide() {
 // Writing these into the post-collision field lets streaming carry them inward.
 func (s *Solver) applyBoundaries() {
 	nx, ny := s.NX, s.NY
+	// Every free-stream boundary cell gets the same nine equilibrium values,
+	// so they are computed once per call instead of once per cell.
+	var eq [9]float64
+	for i := range 9 {
+		eq[i] = feq(i, 1, s.u0, 0)
+	}
 	for y := range ny {
 		c := y * nx
 		for i := range 9 {
-			s.f[i][c] = feq(i, 1, s.u0, 0) // inlet
+			s.f[i][c] = eq[i] // inlet
 		}
 		out := y*nx + (nx - 1)
 		prev := y*nx + (nx - 2)
@@ -237,8 +284,8 @@ func (s *Solver) applyBoundaries() {
 		bottom := x
 		top := (ny-1)*nx + x
 		for i := range 9 {
-			s.f[i][bottom] = feq(i, 1, s.u0, 0)
-			s.f[i][top] = feq(i, 1, s.u0, 0)
+			s.f[i][bottom] = eq[i]
+			s.f[i][top] = eq[i]
 		}
 	}
 }
@@ -255,17 +302,47 @@ func (s *Solver) applyBoundaries() {
 // viscous stress, but it proved numerically noisy at this resolution, so the
 // transparent pressure integral is preferred here.
 func (s *Solver) computeForce() {
-	nx, ny := s.NX, s.NY
 	fx, fy, mz := 0.0, 0.0, 0.0
-	surf, rev := 0, 0
+	rev := 0
+	for _, fc := range s.faces {
+		if s.Ux[fc.c] < 0 {
+			rev++
+		}
+		p := s.Rho[fc.c] / 3
+		dfx := p * fc.ex
+		dfy := p * fc.ey
+		fx += dfx
+		fy += dfy
+		mz += fc.px*dfy - fc.py*dfx
+	}
+	s.Fx, s.Fy, s.Mz = fx, fy, mz
+	if len(s.faces) > 0 {
+		s.Sep = float64(rev) / float64(len(s.faces))
+	} else {
+		s.Sep = 0
+	}
+}
+
+// rebuildFaces rescans the mask for exposed faces. One scan per mask change
+// replaces the four full-grid sweeps computeForce used to pay per step (twelve
+// per desktop frame); even an animated scene changing the mask every frame
+// comes out ahead. The j,y,x order mirrors the old sweep so the force sums are
+// bit-identical.
+func (s *Solver) rebuildFaces() {
+	nx, ny := s.NX, s.NY
+	for j := range s.faceBins {
+		s.faceBins[j] = s.faceBins[j][:0]
+	}
+	// One scan over the grid, binned per direction so the final list keeps the
+	// j-major order of the sweep this replaced (the float sums depend on it).
 	// Only the four axial neighbors are real cell faces; diagonals are corners.
-	for _, j := range [4]int{1, 2, 3, 4} {
-		for y := range ny {
-			for x := range nx {
-				c := y*nx + x
-				if s.solid[c] {
-					continue
-				}
+	for y := range ny {
+		for x := range nx {
+			c := y*nx + x
+			if s.solid[c] {
+				continue
+			}
+			for bin, j := range [4]int{1, 2, 3, 4} {
 				xn := x + exi[j]
 				yn := y + eyi[j]
 				if xn < 0 || xn >= nx || yn < 0 || yn >= ny {
@@ -274,28 +351,21 @@ func (s *Solver) computeForce() {
 				if !s.solid[yn*nx+xn] {
 					continue
 				}
-				surf++
-				if s.Ux[c] < 0 {
-					rev++
-				}
-				p := s.Rho[c] / 3
-				dfx := p * exf[j]
-				dfy := p * eyf[j]
-				// Apply the face force at the face midpoint, half a cell toward
-				// the solid, so the moment arm is centered on the surface.
-				px := float64(x) + 0.5*exf[j]
-				py := float64(y) + 0.5*eyf[j]
-				fx += dfx
-				fy += dfy
-				mz += px*dfy - py*dfx
+				s.faceBins[bin] = append(s.faceBins[bin], face{
+					c:  c,
+					ex: exf[j],
+					ey: eyf[j],
+					// The face force acts at the face midpoint, half a cell
+					// toward the solid, so the moment arm sits on the surface.
+					px: float64(x) + 0.5*exf[j],
+					py: float64(y) + 0.5*eyf[j],
+				})
 			}
 		}
 	}
-	s.Fx, s.Fy, s.Mz = fx, fy, mz
-	if surf > 0 {
-		s.Sep = float64(rev) / float64(surf)
-	} else {
-		s.Sep = 0
+	s.faces = s.faces[:0]
+	for j := range s.faceBins {
+		s.faces = append(s.faces, s.faceBins[j]...)
 	}
 }
 
@@ -304,30 +374,71 @@ func (s *Solver) computeForce() {
 // bounce-back); a source outside the domain keeps the boundary value already set.
 func (s *Solver) stream() {
 	nx, ny := s.NX, s.NY
-	for y := range ny {
-		for x := range nx {
-			c := y*nx + x
-			if s.solid[c] {
-				for i := range 9 {
-					s.ftmp[i][c] = s.f[i][c]
+	// Interior cells, direction-major: every source is in-domain, so the four
+	// bounds tests the general loop pays per cell per direction disappear, and
+	// each direction walks two contiguous arrays. Assignments are identical to
+	// the general loop's, so the populations come out bit for bit the same.
+	solid := s.solid
+	s.forRows(ny-2, func(b0, b1 int) {
+		for i := range 9 {
+			fi := s.f[i]
+			fti := s.ftmp[i]
+			fo := s.f[opp[i]]
+			off := eyi[i]*nx + exi[i]
+			for y := 1 + b0; y < 1+b1; y++ {
+				row := y * nx
+				for x := 1; x < nx-1; x++ {
+					c := row + x
+					if solid[c] {
+						fti[c] = fi[c]
+						continue
+					}
+					src := c - off
+					if solid[src] {
+						fti[c] = fo[c]
+						continue
+					}
+					fti[c] = fi[src]
 				}
-				continue
-			}
-			for i := range 9 {
-				sx := x - exi[i]
-				sy := y - eyi[i]
-				if sx < 0 || sx >= nx || sy < 0 || sy >= ny {
-					s.ftmp[i][c] = s.f[i][c]
-					continue
-				}
-				src := sy*nx + sx
-				if s.solid[src] {
-					s.ftmp[i][c] = s.f[opp[i]][c]
-					continue
-				}
-				s.ftmp[i][c] = s.f[i][src]
 			}
 		}
+	})
+	// Border cells keep the general form, including the keep-boundary-value
+	// case for sources outside the domain.
+	for y := range ny {
+		s.streamCell(0, y)
+		s.streamCell(nx-1, y)
+	}
+	for x := 1; x < nx-1; x++ {
+		s.streamCell(x, 0)
+		s.streamCell(x, ny-1)
+	}
+}
+
+// streamCell streams one cell with full bounds handling; only the domain
+// border pays this general form.
+func (s *Solver) streamCell(x, y int) {
+	nx, ny := s.NX, s.NY
+	c := y*nx + x
+	if s.solid[c] {
+		for i := range 9 {
+			s.ftmp[i][c] = s.f[i][c]
+		}
+		return
+	}
+	for i := range 9 {
+		sx := x - exi[i]
+		sy := y - eyi[i]
+		if sx < 0 || sx >= nx || sy < 0 || sy >= ny {
+			s.ftmp[i][c] = s.f[i][c]
+			continue
+		}
+		src := sy*nx + sx
+		if s.solid[src] {
+			s.ftmp[i][c] = s.f[opp[i]][c]
+			continue
+		}
+		s.ftmp[i][c] = s.f[i][src]
 	}
 }
 
