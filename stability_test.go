@@ -51,6 +51,39 @@ func TestStepSimResetsAfterInstability(t *testing.T) {
 	}
 }
 
+// TestSetSpeedRejectsNonFinite guards the choke point every caller of
+// setSpeed goes through, including UDP control: math.Min/math.Max propagate a
+// NaN instead of rejecting it, so an unchecked "SPD nan" over the network
+// would permanently NaN out u0 with no UI path back.
+func TestSetSpeedRejectsNonFinite(t *testing.T) {
+	g := simGame()
+	want := g.u0
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		g.setSpeed(bad)
+		if g.u0 != want {
+			t.Fatalf("setSpeed(%v): u0 = %v, want unchanged %v", bad, g.u0, want)
+		}
+		if !g.sim.Finite() {
+			t.Fatalf("setSpeed(%v): solver went non-finite", bad)
+		}
+	}
+}
+
+// TestSetAlphaRejectsNonFinite mirrors TestSetSpeedRejectsNonFinite for the
+// angle-of-attack path: math.Mod passes a NaN straight through (it compares
+// false against both wrap bounds), so an unchecked "AOA inf" would
+// permanently NaN out alphaDeg.
+func TestSetAlphaRejectsNonFinite(t *testing.T) {
+	g := simGame()
+	want := g.alphaDeg
+	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		g.setAlpha(bad)
+		if g.alphaDeg != want {
+			t.Fatalf("setAlpha(%v): alphaDeg = %v, want unchanged %v", bad, g.alphaDeg, want)
+		}
+	}
+}
+
 // TestInstabilityResetKeepsSceneBody guards the scene-mode gap: the reset must
 // rebuild the flow around the LOADED SCENE's mask, not the interactive foil's.
 func TestInstabilityResetKeepsSceneBody(t *testing.T) {

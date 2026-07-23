@@ -1033,7 +1033,17 @@ func (g *Game) saveSceneAs() {
 // setAlpha changes the angle of attack. In foil mode it re-rasterizes the body
 // (without resetting the flow); in scene mode the angle is applied as a global
 // rotation each frame, so nothing else is needed here.
+//
+// deg must be finite: math.Mod/the wrap below pass a NaN straight through
+// (NaN compares false against both bounds, so neither branch catches it),
+// which would permanently NaN out alphaDeg with no UI path back. Sliders and
+// keyboard input can't produce a non-finite value, but a caller reachable
+// from outside the process (UDP control) can, so every caller is protected
+// by rejecting it here rather than trusting each caller to check first.
 func (g *Game) setAlpha(deg float64) {
+	if math.IsNaN(deg) || math.IsInf(deg, 0) {
+		return
+	}
 	g.simErr = ""
 	// Free rotation: wrap into (-180, 180] instead of clamping, so stepping
 	// past either end keeps spinning the foil the same way.
@@ -1055,7 +1065,15 @@ func (g *Game) setAlpha(deg float64) {
 }
 
 // setSpeed changes the free-stream speed in place (no reset).
+//
+// u must be finite: math.Min/math.Max propagate a NaN instead of rejecting
+// it, so an unchecked NaN here would permanently NaN out u0 with no UI path
+// back to recover. See setAlpha for why the check lives here rather than in
+// each caller.
 func (g *Game) setSpeed(u float64) {
+	if math.IsNaN(u) || math.IsInf(u, 0) {
+		return
+	}
 	g.simErr = ""
 	g.u0 = math.Max(0.02, math.Min(0.15, u))
 	g.sim.SetInletSpeed(g.u0)
