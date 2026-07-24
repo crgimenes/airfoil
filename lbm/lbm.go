@@ -196,27 +196,47 @@ func feq(i int, rho, ux, uy float64) float64 {
 // Step advances the simulation by one lattice time unit: collide, apply the
 // open-channel boundaries, tally the wall force, then stream with bounce-back.
 func (s *Solver) Step() {
-	s.collide()
-	s.applyBoundaries()
-	s.computeForce()
-	s.stream()
-	s.f, s.ftmp = s.ftmp, s.f
+	s.StepN(1)
+}
+
+// StepN advances n lattice time units.
+//
+// Only the last of the n steps materializes the macroscopic fields and the
+// wall forces. Nothing outside the solver can observe the intermediate values:
+// Fx/Fy/Mz/Sep are overwritten by the next step, and Rho/Ux/Uy are read by the
+// renderer and the tracers only after the whole batch is done. Writing three
+// full-grid fields per substep is therefore pure memory traffic, and on a
+// memory-bound kernel traffic is the cost.
+func (s *Solver) StepN(n int) {
+	for i := range n {
+		last := i == n-1
+		s.collide(last)
+		s.applyBoundaries()
+		if last {
+			s.computeForce()
+		}
+		s.stream()
+		s.f, s.ftmp = s.ftmp, s.f
+	}
 }
 
 // collide relaxes every fluid cell toward local equilibrium (BGK) and refreshes
 // the macroscopic fields in place. Solid cells are skipped and report no flow.
-func (s *Solver) collide() {
+func (s *Solver) collide(store bool) {
 	s.forRows(s.NY, func(y0, y1 int) {
-		s.collideRange(y0*s.NX, y1*s.NX)
+		s.collideRange(y0*s.NX, y1*s.NX, store)
 	})
 }
 
 // collideRange is collide over the cell range [c0, c1), the unit forRows
-// hands to each worker.
-func (s *Solver) collideRange(c0, c1 int) {
+// hands to each worker. store says whether to publish the macroscopic fields;
+// see StepN for why an intermediate substep skips them.
+func (s *Solver) collideRange(c0, c1 int, store bool) {
 	for c := c0; c < c1; c++ {
 		if s.solid[c] {
-			s.Rho[c], s.Ux[c], s.Uy[c] = 1, 0, 0
+			if store {
+				s.Rho[c], s.Ux[c], s.Uy[c] = 1, 0, 0
+			}
 			continue
 		}
 		rho := 0.0
@@ -248,7 +268,9 @@ func (s *Solver) collideRange(c0, c1 int) {
 			ux *= k
 			uy *= k
 		}
-		s.Rho[c], s.Ux[c], s.Uy[c] = rho, ux, uy
+		if store {
+			s.Rho[c], s.Ux[c], s.Uy[c] = rho, ux, uy
+		}
 		// The equilibrium's 1 - 1.5*u^2 term is the same for all nine
 		// directions, so it is computed once here instead of inside feq nine
 		// times. Same math, fewer multiplies; forces stay within the physics

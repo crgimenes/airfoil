@@ -47,9 +47,7 @@ func BenchmarkFrame(b *testing.B) {
 	s := benchSolver(false)
 	b.ReportAllocs()
 	for b.Loop() {
-		s.Step()
-		s.Step()
-		s.Step()
+		s.StepN(3)
 		s.Finite()
 	}
 }
@@ -58,7 +56,7 @@ func BenchmarkCollide(b *testing.B) {
 	s := benchSolver(false)
 	b.ReportAllocs()
 	for b.Loop() {
-		s.collide()
+		s.collide(true)
 	}
 }
 

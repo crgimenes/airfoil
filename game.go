@@ -780,9 +780,7 @@ func (g *Game) Update() error {
 // single-step — must go through here.
 func (g *Game) stepSim(n int) {
 	t0 := g.perf.now()
-	for range n {
-		g.sim.Step()
-	}
+	g.sim.StepN(n)
 	g.perf.add(&g.perf.solver, t0)
 	if g.sim.Finite() {
 		return

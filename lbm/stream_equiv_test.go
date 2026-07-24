@@ -57,7 +57,7 @@ func TestStreamMatchesReference(t *testing.T) {
 		for range 3 {
 			s.Step()
 		}
-		s.collide()
+		s.collide(true)
 		s.applyBoundaries()
 		s.computeForce()
 
