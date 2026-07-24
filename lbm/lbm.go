@@ -85,6 +85,9 @@ type Solver struct {
 	// grid once while still emitting the list in j-major order. An animated
 	// scene rebuilds every frame, so the scan count matters.
 	faceBins [4][]face
+
+	// rings is the fused kernel's per-worker row window; see fused.go.
+	rings [][]float32
 }
 
 // face is one exposed body face: a fluid cell whose axial neighbor is solid.
@@ -210,18 +213,20 @@ func (s *Solver) Step() {
 func (s *Solver) StepN(n int) {
 	for i := range n {
 		last := i == n-1
-		s.collide(last)
-		s.applyBoundaries()
+		s.stepOnce(last)
 		if last {
 			s.computeForce()
 		}
-		s.stream()
 		s.f, s.ftmp = s.ftmp, s.f
 	}
 }
 
 // collide relaxes every fluid cell toward local equilibrium (BGK) and refreshes
 // the macroscopic fields in place. Solid cells are skipped and report no flow.
+//
+// This phase and the two that follow it are the browser build's step (see
+// step_js.go) and the reference the fused kernel is tested against, so a
+// deadcode run over a native build reports them unreachable. They are not.
 func (s *Solver) collide(store bool) {
 	s.forRows(s.NY, func(y0, y1 int) {
 		s.collideRange(y0*s.NX, y1*s.NX, store)

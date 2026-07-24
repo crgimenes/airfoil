@@ -15,13 +15,7 @@ import (
 // The goroutines are spawned per call rather than pooled: a phase costs
 // hundreds of microseconds and a spawn about one, so a pool would buy noise.
 func (s *Solver) forRows(ny int, fn func(y0, y1 int)) {
-	workers := s.Workers
-	if workers <= 0 {
-		workers = runtime.GOMAXPROCS(0)
-	}
-	if workers > ny {
-		workers = ny
-	}
+	workers := s.workerCount(ny)
 	if workers <= 1 {
 		fn(0, ny)
 		return
@@ -39,4 +33,37 @@ func (s *Solver) forRows(ny int, fn func(y0, y1 int)) {
 		})
 	}
 	wg.Wait()
+}
+
+// forRowsIdx is forRows with the band index handed to fn, for phases that need
+// per-worker scratch. The index is dense and below the worker count, so it can
+// address a preallocated slice.
+func (s *Solver) forRowsIdx(ny int, fn func(w, y0, y1 int)) {
+	workers := s.workerCount(ny)
+	if workers <= 1 {
+		fn(0, 0, ny)
+		return
+	}
+	chunk := (ny + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := range workers {
+		y0 := w * chunk
+		y1 := min(y0+chunk, ny)
+		if y0 >= y1 {
+			break
+		}
+		wg.Go(func() {
+			fn(w, y0, y1)
+		})
+	}
+	wg.Wait()
+}
+
+// workerCount is the band count both row helpers agree on.
+func (s *Solver) workerCount(ny int) int {
+	workers := s.Workers
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	return min(workers, ny)
 }
