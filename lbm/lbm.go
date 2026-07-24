@@ -52,7 +52,11 @@ type Solver struct {
 	omega float64 // BGK relaxation rate, 1/tau
 	u0    float64 // free-stream speed in lattice units, along +x
 
-	f, ftmp [9][]float64 // distribution functions, double-buffered for streaming
+	// Populations are float32 to halve the solver's memory footprint and traffic;
+	// the kernel is memory-bound, so this is the lever, not more arithmetic. All
+	// math is still done in float64 (promote on read, demote on write), so only
+	// storage precision drops. Macroscopic fields stay float64 for the API.
+	f, ftmp [9][]float32 // distribution functions, double-buffered for streaming
 	solid   []bool       // true where a cell is part of the body (wall)
 
 	// Macroscopic fields, refreshed every Step and indexed y*NX+x. Exposed for
@@ -106,8 +110,8 @@ func New(nx, ny int, tau, u0 float64) *Solver {
 		Uy:    make([]float64, nx*ny),
 	}
 	for i := range 9 {
-		s.f[i] = make([]float64, nx*ny)
-		s.ftmp[i] = make([]float64, nx*ny)
+		s.f[i] = make([]float32, nx*ny)
+		s.ftmp[i] = make([]float32, nx*ny)
 	}
 	s.Reset()
 	return s
@@ -121,7 +125,7 @@ func (s *Solver) Reset() {
 		s.Ux[c] = s.u0
 		s.Uy[c] = 0
 		for i := range 9 {
-			s.f[i][c] = feq(i, 1, s.u0, 0)
+			s.f[i][c] = float32(feq(i, 1, s.u0, 0))
 		}
 	}
 }
@@ -144,7 +148,7 @@ func (s *Solver) UpdateSolid(mask []bool) {
 	for c := range mask {
 		if s.solid[c] && !mask[c] {
 			for i := range 9 {
-				s.f[i][c] = feq(i, 1, s.u0, 0)
+				s.f[i][c] = float32(feq(i, 1, s.u0, 0))
 			}
 		}
 		s.solid[c] = mask[c]
@@ -219,7 +223,7 @@ func (s *Solver) collideRange(c0, c1 int) {
 		mx := 0.0
 		my := 0.0
 		for i := range 9 {
-			fi := s.f[i][c]
+			fi := float64(s.f[i][c])
 			rho += fi
 			mx += fi * exf[i]
 			my += fi * eyf[i]
@@ -253,7 +257,8 @@ func (s *Solver) collideRange(c0, c1 int) {
 		wrho := rho * s.omega
 		for i := range 9 {
 			cu := exf[i]*ux + eyf[i]*uy
-			s.f[i][c] += wrho*w[i]*(base+3*cu+4.5*cu*cu) - s.omega*s.f[i][c]
+			fi := float64(s.f[i][c])
+			s.f[i][c] = float32(fi + wrho*w[i]*(base+3*cu+4.5*cu*cu) - s.omega*fi)
 		}
 	}
 }
@@ -265,9 +270,9 @@ func (s *Solver) applyBoundaries() {
 	nx, ny := s.NX, s.NY
 	// Every free-stream boundary cell gets the same nine equilibrium values,
 	// so they are computed once per call instead of once per cell.
-	var eq [9]float64
+	var eq [9]float32
 	for i := range 9 {
-		eq[i] = feq(i, 1, s.u0, 0)
+		eq[i] = float32(feq(i, 1, s.u0, 0))
 	}
 	for y := range ny {
 		c := y * nx
