@@ -61,10 +61,10 @@ func TestStreamMatchesReference(t *testing.T) {
 		s.applyBoundaries()
 		s.computeForce()
 
-		ref := make([][]float64, 9)
+		ref := make([][]float32, 9)
 		s.streamReference()
 		for i := range 9 {
-			ref[i] = append([]float64(nil), s.ftmp[i]...)
+			ref[i] = append([]float32(nil), s.ftmp[i]...)
 		}
 		s.stream()
 		for i := range 9 {
