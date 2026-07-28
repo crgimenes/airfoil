@@ -77,6 +77,18 @@ func TestApplyControlMessageTogglesAndMode(t *testing.T) {
 		t.Error("STREAMLINES 1 should turn streamlines on")
 	}
 
+	g.applyControlMessage("PARTICLES 0")
+	g.drainPending()
+	if g.showParticles {
+		t.Error("PARTICLES 0 should turn particles off")
+	}
+
+	g.applyControlMessage("PARTICLES 1")
+	g.drainPending()
+	if !g.showParticles {
+		t.Error("PARTICLES 1 should turn particles on")
+	}
+
 	g.applyControlMessage("MODE pressure")
 	g.drainPending()
 	if g.mode != modePressure {

@@ -169,16 +169,17 @@ type Game struct {
 
 	ptr pointer // this frame's pointer, mouse or finger; see pointer.go
 
-	profileIdx  int     // index into profiles for Tab-cycling presets
-	nacaCode    string  // active NACA 4-digit code (any code, not just a preset)
-	nacaInput   string  // NACA code being typed in the toolbar field
-	alphaDeg    float64 // angle of attack in degrees
-	u0          float64
-	controlDeg  float64 // live deflection of the scene's Control object, in degrees
-	mode        fieldMode
-	paused      bool
-	streamlines bool // overlay integrated streamlines
-	glow        bool // additive bloom on the smoke
+	profileIdx    int     // index into profiles for Tab-cycling presets
+	nacaCode      string  // active NACA 4-digit code (any code, not just a preset)
+	nacaInput     string  // NACA code being typed in the toolbar field
+	alphaDeg      float64 // angle of attack in degrees
+	u0            float64
+	controlDeg    float64 // live deflection of the scene's Control object, in degrees
+	mode          fieldMode
+	paused        bool
+	streamlines   bool // overlay integrated streamlines
+	glow          bool // additive bloom on the smoke
+	showParticles bool // draw the smoke tracers at all; off isolates streamlines with a clean background
 	// clean hides every panel/control, drawing only the flow image -- exactly
 	// what -hidecontrols has always meant, on its own. kiosk adds the rest of
 	// kiosk mode on top of that: a trimmed menu bar and blocking
@@ -324,11 +325,12 @@ type Game struct {
 // NewGame builds the simulation, geometry and render targets.
 func NewGame() *Game {
 	g := &Game{
-		alphaDeg:  4,
-		u0:        defaultU,
-		glow:      true,
-		nacaCode:  profiles[0],
-		nacaInput: profiles[0],
+		alphaDeg:      4,
+		u0:            defaultU,
+		glow:          true,
+		showParticles: true,
+		nacaCode:      profiles[0],
+		nacaInput:     profiles[0],
 	}
 	g.sim = lbm.New(gridW, gridH, tau, g.u0)
 	g.smoke = viz.NewParticles(nParticles, gridW, gridH, 1)
@@ -626,6 +628,7 @@ func (g *Game) menuItems() []menu.Item {
 			{Separator: true},
 			{Title: mark(g.streamlines) + "Streamlines", OnClick: act(func() { g.streamlines = !g.streamlines })},
 			{Title: mark(g.glow) + "Glow", OnClick: act(func() { g.glow = !g.glow })},
+			{Title: mark(g.showParticles) + "Particles", OnClick: act(func() { g.showParticles = !g.showParticles })},
 			{Title: mark(g.paused) + "Pause", OnClick: act(func() { g.paused = !g.paused })},
 			{Separator: true},
 			{Title: "Enter Kiosk Mode", OnClick: act(func() { g.enterKiosk(false) })},
@@ -647,6 +650,7 @@ type menuSig struct {
 	mode          fieldMode
 	streamlines   bool
 	glow          bool
+	showParticles bool
 	paused        bool
 	snapOn        bool
 	nacaCode      string
@@ -667,6 +671,7 @@ func (g *Game) menuSignature() menuSig {
 		mode:          g.mode,
 		streamlines:   g.streamlines,
 		glow:          g.glow,
+		showParticles: g.showParticles,
 		paused:        g.paused,
 		snapOn:        g.snapOn,
 		nacaCode:      g.nacaCode,
@@ -947,6 +952,9 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyG) {
 		g.glow = !g.glow
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
+		g.showParticles = !g.showParticles
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		g.paused = !g.paused
 	}
@@ -1205,7 +1213,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	op.Filter = ebiten.FilterLinear
 	vp.DrawImage(g.fieldImg, op)
 
-	g.drawSmoke(vp)
+	if g.showParticles {
+		g.drawSmoke(vp)
+	}
 	if g.streamlines {
 		g.drawStreamlines(vp)
 	}
@@ -1737,6 +1747,7 @@ func (g *Game) drawBottomPanel(screen *ebiten.Image) {
 		{"V", "speed/vort/press"},
 		{"S", "streamlines"},
 		{"G", "glow / bloom"},
+		{"P", "particles"},
 		{"[  ]", "inlet speed"},
 		{"Space", "pause / resume"},
 		{"N", "step (paused)"},
