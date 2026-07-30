@@ -149,7 +149,8 @@ type Game struct {
 
 	perf perfLog // -debug terminal metrics; see perflog.go
 
-	tps int // tick rate; 0 means the standard 60 (see tickrate.go)
+	tps  int // tick rate; 0 means the standard 60 (see tickrate.go)
+	warp int // simulation-time multiplier; 0 or 1 means real time (see tickrate.go)
 
 	// Scratch storage for the per-frame body rebuild (mask rasterization and
 	// scene polygon transforms). Reused serially within a frame, never held
@@ -757,7 +758,7 @@ func (g *Game) Update() error {
 		g.sim.UpdateSolid(g.sceneMask(g.scn.LoopTime(g.animTime)))
 	}
 	g.stepSim(g.substepsPerTick())
-	g.smoke.Step(g.sim, tracerSpeed*g.tickScale())
+	g.smoke.Step(g.sim, tracerSpeed*g.tickScale()*float64(g.warpFactor()))
 	a := g.emaAlphaPerTick() // EMA smoothing for the displayed forces
 	g.fxEMA += a * (g.sim.Fx - g.fxEMA)
 	g.fyEMA += a * (g.sim.Fy - g.fyEMA)

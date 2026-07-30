@@ -13,6 +13,28 @@ import "math"
 // What changes is the budget: half the ticks frees the thread to draw twice
 // the frames. The one real cost is input latency, one tick, 33 ms at 30.
 
+// maxWarp bounds the time multiplier. Four is already beyond what any current
+// machine sustains at 60 ticks; the bound exists so a typo cannot ask for a
+// thousandfold simulation.
+const maxWarp = 4
+
+// validWarp reports whether w is a usable time multiplier.
+func validWarp(w int) bool {
+	return w >= 1 && w <= maxWarp
+}
+
+// warpFactor is the simulation-time multiplier: how many times faster than
+// real time the flow evolves. The wind does not change, time does, so the
+// solver stays at the same stable operating point while the smoke, the wake
+// and the shedding all move proportionally faster on screen. The cost is
+// linear CPU: each tick runs warp times the solver steps.
+func (g *Game) warpFactor() int {
+	if g.warp <= 1 {
+		return 1
+	}
+	return g.warp
+}
+
 // validTPS reports whether the physics rate divides cleanly into tps ticks, so
 // every derived quantity below stays exact.
 func validTPS(tps int) bool {
@@ -35,9 +57,9 @@ func (g *Game) tickScale() float64 {
 }
 
 // substepsPerTick keeps the solver at the same steps per second regardless of
-// the tick rate.
+// the tick rate, times the warp factor when simulation time is accelerated.
 func (g *Game) substepsPerTick() int {
-	return substeps * 60 / g.tickTPS()
+	return substeps * 60 / g.tickTPS() * g.warpFactor()
 }
 
 // emaAlphaPerTick compensates the force-readout smoothing so its time constant
