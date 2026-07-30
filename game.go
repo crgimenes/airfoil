@@ -149,6 +149,8 @@ type Game struct {
 
 	perf perfLog // -debug terminal metrics; see perflog.go
 
+	tps int // tick rate; 0 means the standard 60 (see tickrate.go)
+
 	// Scratch storage for the per-frame body rebuild (mask rasterization and
 	// scene polygon transforms). Reused serially within a frame, never held
 	// across one; keeps an animated scene at zero allocations after warm-up.
@@ -746,12 +748,12 @@ func (g *Game) Update() error {
 	// Advance the timeline only while playing; the fluid keeps simulating either
 	// way, so a frozen pose still develops its steady flow.
 	if g.scn != nil && g.animPlaying {
-		g.animTime += animDt
+		g.animTime += animDt * g.tickScale()
 		g.sim.UpdateSolid(g.sceneMask(g.scn.LoopTime(g.animTime)))
 	}
-	g.stepSim(substeps)
-	g.smoke.Step(g.sim, tracerSpeed)
-	const a = 0.04 // EMA smoothing for the displayed forces
+	g.stepSim(g.substepsPerTick())
+	g.smoke.Step(g.sim, tracerSpeed*g.tickScale())
+	a := g.emaAlphaPerTick() // EMA smoothing for the displayed forces
 	g.fxEMA += a * (g.sim.Fx - g.fxEMA)
 	g.fyEMA += a * (g.sim.Fy - g.fyEMA)
 	g.mzEMA += a * (g.sim.Mz - g.mzEMA)
