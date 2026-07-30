@@ -22,6 +22,7 @@ func main() {
 	mode := flag.String("mode", "", "field display at startup: speed, vorticity, or pressure (default speed)")
 	udpAddr := flag.String("udp", "", "listen address (e.g. :9000) for UDP slider control from external hardware; disabled if empty")
 	debug := flag.Bool("debug", false, "log per-second performance lines and events to the terminal")
+	tps := flag.Int("tps", 60, "simulation ticks per second; lower values (e.g. 30) free a slow machine to draw more frames, with the flow speed unchanged")
 	scenePath := flag.String("scene", "", "path to an .afoil scene file to load at startup instead of the interactive default foil")
 	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
 	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
@@ -34,6 +35,14 @@ func main() {
 
 	g := NewGame()
 	g.perf.enabled = *debug
+	if *tps != 60 {
+		if validTPS(*tps) {
+			g.tps = *tps
+			ebiten.SetTPS(*tps)
+		} else {
+			log.Printf("kutta: -tps %d: not a clean divisor of the physics rate; keeping 60", *tps)
+		}
+	}
 	g.glow = *glow
 	g.streamlines = *streamlines
 	if *mode != "" {
