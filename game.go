@@ -1275,11 +1275,31 @@ func (g *Game) fieldColor(x, y int) color.RGBA {
 	case modeVorticity:
 		return viz.Vorticity(g.sim.Vorticity(x, y), vortScale)
 	case modePressure:
-		return viz.Pressure(g.cp(c), cpScale)
+		return viz.Pressure(g.cpSmoothed(x, y), cpScale)
 	default:
 		speed := math.Hypot(g.sim.Ux[c], g.sim.Uy[c])
 		return viz.Speed(speed / (g.u0 * 2))
 	}
+}
+
+// cpSmoothed is the pressure coefficient at (x,y) averaged with its non-solid
+// axial neighbors, for display only. Bounce-back boundaries leave density with
+// more cell-to-cell noise than velocity (which goes smoothly to zero at a
+// no-slip wall) or vorticity (already smoothed by its central difference), so
+// the raw per-cell value renders visibly blocky right at the body surface
+// where it matters most; this doesn't touch the solver's actual Rho.
+func (g *Game) cpSmoothed(x, y int) float64 {
+	sum := g.cp(y*gridW + x)
+	n := 1.0
+	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+d[0], y+d[1]
+		if nx < 0 || nx >= gridW || ny < 0 || ny >= gridH || g.sim.Solid(nx, ny) {
+			continue
+		}
+		sum += g.cp(ny*gridW + nx)
+		n++
+	}
+	return sum / n
 }
 
 // cp is the pressure coefficient at cell c, from the lattice equation of state
