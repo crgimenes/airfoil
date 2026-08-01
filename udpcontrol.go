@@ -6,7 +6,12 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// udpRebindInterval is how often a multicast listener is closed and reopened
+// to force a fresh OS-level group join; see startUDPControl.
+const udpRebindInterval = 30 * time.Second
 
 // startUDPControl opens a UDP listener at addr and applies incoming
 // slider/display commands as they arrive, for driving kutta from external
@@ -32,8 +37,47 @@ func (g *Game) startUDPControl(addr string) error {
 		return err
 	}
 	log.Printf("kutta: UDP control listening on %s", conn.LocalAddr())
-	go g.udpControlLoop(conn)
+	go g.udpControlSupervisor(addr, conn)
 	return nil
+}
+
+// udpControlSupervisor runs the read loop on conn and, for a multicast
+// address, periodically closes and reopens the listener. Multicast group
+// membership can be silently dropped by the OS with no error and nothing to
+// observe on the existing connection (a Wi-Fi power-save cycle or a roam
+// event, in practice) -- Go's net package exposes no way to check or refresh
+// membership on an already-open socket, so a full re-bind, which forces a
+// fresh join, is the fix that needs no new dependency. Unicast never drops
+// membership (there is none), so it only ever runs the plain read loop.
+func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
+	if !isMulticastAddr(addr) {
+		g.udpControlLoop(conn)
+		return
+	}
+	for {
+		done := make(chan struct{})
+		go func(c net.PacketConn) {
+			g.udpControlLoop(c)
+			close(done)
+		}(conn)
+
+		select {
+		case <-done:
+			// The read loop only returns on a real socket error; rebinding
+			// below is also the recovery path for that, not just the timer.
+		case <-time.After(udpRebindInterval):
+			conn.Close()
+			<-done
+		}
+
+		newConn, err := listenUDPControl(addr)
+		if err != nil {
+			log.Printf("kutta: UDP control: rebind failed, retrying: %v", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		conn = newConn
+	}
 }
 
 // listenUDPControl opens addr for receiving: a multicast group join if the
