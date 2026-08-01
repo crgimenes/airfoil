@@ -1266,19 +1266,57 @@ func (g *Game) paintField() {
 	g.fieldImg.WritePixels(g.pixbuf)
 }
 
+// edgeFeather softens a fluid cell's color toward the body's where they sit at
+// the raster grid's resolution, not the smooth vector outline's. That raster
+// edge is a stairstep in every mode; the vector outline (drawOutline) is thin
+// enough to leave it peeking out, and how visible that is depends on how much
+// the mode's color scheme contrasts against colBody right at the wall --
+// sharpest for pressure, since its diverging scale doesn't fade to zero at a
+// no-slip boundary the way speed and vorticity naturally do.
+const edgeFeather = 0.35
+
 func (g *Game) fieldColor(x, y int) color.RGBA {
 	if g.sim.Solid(x, y) {
 		return colBody
 	}
 	c := y*gridW + x
+	var col color.RGBA
 	switch g.mode {
 	case modeVorticity:
-		return viz.Vorticity(g.sim.Vorticity(x, y), vortScale)
+		col = viz.Vorticity(g.sim.Vorticity(x, y), vortScale)
 	case modePressure:
-		return viz.Pressure(g.cpSmoothed(x, y), cpScale)
+		col = viz.Pressure(g.cpSmoothed(x, y), cpScale)
 	default:
 		speed := math.Hypot(g.sim.Ux[c], g.sim.Uy[c])
-		return viz.Speed(speed / (g.u0 * 2))
+		col = viz.Speed(speed / (g.u0 * 2))
+	}
+	if g.adjacentToSolid(x, y) {
+		col = mixColor(col, colBody, edgeFeather)
+	}
+	return col
+}
+
+// adjacentToSolid reports whether any of (x,y)'s four axial neighbors is body.
+func (g *Game) adjacentToSolid(x, y int) bool {
+	for _, d := range [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
+		nx, ny := x+d[0], y+d[1]
+		if nx < 0 || nx >= gridW || ny < 0 || ny >= gridH {
+			continue
+		}
+		if g.sim.Solid(nx, ny) {
+			return true
+		}
+	}
+	return false
+}
+
+// mixColor blends a toward b by t in [0,1].
+func mixColor(a, b color.RGBA, t float64) color.RGBA {
+	return color.RGBA{
+		R: uint8(float64(a.R) + (float64(b.R)-float64(a.R))*t),
+		G: uint8(float64(a.G) + (float64(b.G)-float64(a.G))*t),
+		B: uint8(float64(a.B) + (float64(b.B)-float64(a.B))*t),
+		A: 0xff,
 	}
 }
 
