@@ -19,6 +19,7 @@ func main() {
 	kioskControls := flag.Bool("kiosk-controls", false, "in kiosk mode, keep the AoA/speed/control sliders visible and usable")
 	glow := flag.Bool("glow", true, "additive bloom on the smoke")
 	particles := flag.Bool("particles", true, "draw the smoke tracers; turn off to show streamlines alone against a clean background")
+	label := flag.Bool("label", false, "overlay a legend (mode, colorbar, calculated and user-set values) in the lower-right corner")
 	streamlines := flag.Bool("streamlines", false, "overlay integrated streamlines")
 	mode := flag.String("mode", "", "field display at startup: speed, vorticity, or pressure (default speed)")
 	udpAddr := flag.String("udp", "", "listen address (e.g. :9000) for UDP slider control from external hardware; disabled if empty")
@@ -54,6 +55,7 @@ func main() {
 	}
 	g.glow = *glow
 	g.showParticles = *particles
+	g.showLabel = *label
 	g.streamlines = *streamlines
 	if *mode != "" {
 		fm, ok := parseFieldMode(*mode)

@@ -23,7 +23,7 @@ import (
 // parses as a multicast IP.
 //
 // Channels: AOA and SPD (angle of attack, inlet speed, both numeric), GLOW,
-// STREAMLINES and PARTICLES (0 or 1), and MODE (speed, vorticity, or
+// STREAMLINES, PARTICLES and LABEL (0 or 1), and MODE (speed, vorticity, or
 // pressure). A control-surface channel is a natural follow-up once there's a
 // live control-surface slider for it to drive.
 func (g *Game) startUDPControl(addr string) error {
@@ -128,6 +128,13 @@ func (g *Game) applyControlMessage(line string) {
 			return
 		}
 		g.enqueue(func() { g.showParticles = on != 0 })
+	case "LABEL":
+		on, perr := strconv.ParseFloat(value, 64)
+		if perr != nil {
+			log.Printf("kutta: UDP control: LABEL wants 0 or 1, got %q", value)
+			return
+		}
+		g.enqueue(func() { g.showLabel = on != 0 })
 	case "MODE":
 		fm, fok := parseFieldMode(value)
 		if !fok {
