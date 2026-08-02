@@ -23,9 +23,11 @@ import (
 // parses as a multicast IP.
 //
 // Channels: AOA and SPD (angle of attack, inlet speed, both numeric), GLOW,
-// STREAMLINES and PARTICLES (0 or 1), and MODE (speed, vorticity, or
-// pressure). A control-surface channel is a natural follow-up once there's a
-// live control-surface slider for it to drive.
+// STREAMLINES and PARTICLES (0 or 1), MODE (speed, vorticity, or pressure),
+// and DEMO (seconds of no real input before the sim gently wanders on its
+// own; 0 disables it), mirroring the -demo flag exactly. A control-surface
+// channel is a natural follow-up once there's a live control-surface slider
+// for it to drive.
 func (g *Game) startUDPControl(addr string) error {
 	conn, err := listenUDPControl(addr)
 	if err != nil {
@@ -135,6 +137,22 @@ func (g *Game) applyControlMessage(line string) {
 			return
 		}
 		g.enqueue(func() { g.mode = fm })
+	case "DEMO":
+		v, perr := strconv.ParseFloat(value, 64)
+		if perr != nil {
+			log.Printf("kutta: UDP control: DEMO wants a number of seconds (0 disables), got %q", value)
+			return
+		}
+		g.enqueue(func() {
+			g.demoIdleSec = v
+			if v <= 0 {
+				// Hand control back immediately rather than freezing mid-wander:
+				// updateDemo skips everything once demoIdleSec <= 0, so without
+				// this it wouldn't apply further changes but also wouldn't clear
+				// the flag it's using to track that state.
+				g.demoActive = false
+			}
+		})
 	default:
 		log.Printf("kutta: UDP control: unknown channel %q", channel)
 	}
