@@ -195,6 +195,18 @@ type Game struct {
 	kiosk         bool
 	kioskControls bool
 
+	// showLabel overlays a compact legend (mode, colorbar, calculated and
+	// user-set values) in the lower-right of the flow viewport -- unlike the
+	// side panel, it still shows in kiosk/clean mode, since that's the only
+	// place an unattended exhibit display can read these values at all.
+	showLabel bool
+	// labelBarImg caches the legend's gradient bar: its pixels are a pure
+	// function of mode (fixed t in [0,1], not live field data), so redrawing
+	// it from scratch every frame -- 48 FillRect calls plus their state
+	// changes -- was pure waste. Rebuilt only when labelBarMode != mode.
+	labelBarImg  *ebiten.Image
+	labelBarMode fieldMode
+
 	// startFullscreen defers the -fullscreen flag until a few frames have been
 	// drawn: entering fullscreen during startup blanks the screen on macOS (it
 	// stays black until a resize), while toggling after launch works. The
@@ -632,6 +644,7 @@ func (g *Game) menuItems() []menu.Item {
 			{Title: mark(g.streamlines) + "Streamlines", OnClick: act(func() { g.streamlines = !g.streamlines })},
 			{Title: mark(g.glow) + "Glow", OnClick: act(func() { g.glow = !g.glow })},
 			{Title: mark(g.showParticles) + "Particles", OnClick: act(func() { g.showParticles = !g.showParticles })},
+			{Title: mark(g.showLabel) + "Label", OnClick: act(func() { g.showLabel = !g.showLabel })},
 			{Title: mark(g.paused) + "Pause", OnClick: act(func() { g.paused = !g.paused })},
 			{Separator: true},
 			{Title: "Enter Kiosk Mode", OnClick: act(func() { g.enterKiosk(false) })},
@@ -654,6 +667,7 @@ type menuSig struct {
 	streamlines   bool
 	glow          bool
 	showParticles bool
+	showLabel     bool
 	paused        bool
 	snapOn        bool
 	nacaCode      string
@@ -675,6 +689,7 @@ func (g *Game) menuSignature() menuSig {
 		streamlines:   g.streamlines,
 		glow:          g.glow,
 		showParticles: g.showParticles,
+		showLabel:     g.showLabel,
 		paused:        g.paused,
 		snapOn:        g.snapOn,
 		nacaCode:      g.nacaCode,
@@ -958,6 +973,9 @@ func (g *Game) handleInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
 		g.showParticles = !g.showParticles
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyH) {
+		g.showLabel = !g.showLabel
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		g.paused = !g.paused
 	}
@@ -1228,6 +1246,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 	g.drawMarkers(vp)
 	g.drawForces(vp)
+	if g.showLabel {
+		g.drawLabel(vp)
+	}
 
 	// Kiosk mode stops here: only the flow image (plus, with kioskControls,
 	// the slider strip), no border, side panel, toolbar, or bottom panel.
@@ -1795,6 +1816,112 @@ func (g *Game) drawColorbar(screen *ebiten.Image, x, y, w, h float64) {
 	}
 }
 
+// charW is basicfont.Face7x13's fixed glyph width, letting text be
+// right-aligned by exact math instead of an approximate measurement.
+const charW = 7.0
+
+// rebuildLabelBarImage (re)renders the legend's gradient bar into
+// labelBarImg. Called only when the mode has changed since the last call;
+// see labelBarImg's field comment for why this is safe to cache.
+func (g *Game) rebuildLabelBarImage(barW, barH float64) {
+	g.labelBarMode = g.mode
+	g.labelBarImg = ebiten.NewImage(int(barW), int(barH))
+	const segs = 48
+	segW := barW / segs
+	for i := range segs {
+		t := float64(i) / (segs - 1)
+		var c color.RGBA
+		switch g.mode {
+		case modeVorticity:
+			c = viz.Vorticity((t*2-1)*vortScale, vortScale)
+		case modePressure:
+			c = viz.Pressure((t*2-1)*cpScale, cpScale)
+		default:
+			c = viz.Speed(t)
+		}
+		vector.FillRect(g.labelBarImg, float32(t*barW), 0, float32(segW+1), float32(barH), c, false)
+	}
+}
+
+// drawLabel overlays a compact, plain-language legend in the lower-right of
+// the flow viewport: what the color means, and the values driving the sim.
+// Unlike the side panel, this still renders in kiosk/clean mode -- an
+// unattended exhibit display has nowhere else to read these from. The sim
+// uses qualitative lattice units with no real physical scale (see lbm's
+// package doc), so "units" here means clear wording and percentages, not a
+// fabricated SI number; and this deliberately shows fewer values than the
+// dev side panel, each one spelled out rather than abbreviated.
+func (g *Game) drawLabel(dst *ebiten.Image) {
+	const panelW = 230.0
+	const barW = 150.0
+	const barH = 10.0
+	const pad = 12.0
+	const lineH = 18.0
+	const sectionGap = 10.0
+
+	hasCtrl := g.controlObject() != nil
+	valueLines := 2.0
+	if hasCtrl {
+		valueLines = 3.0
+	}
+	// Every term below sums the exact same line/gap constants used to draw
+	// it, so the panel can never clip or overlap its own content.
+	barBlockH := lineH + barH + lineH // caption above, the bar, caption below
+	panelH := pad*2 + lineH + sectionGap + barBlockH + sectionGap + valueLines*lineH + sectionGap + lineH
+
+	x := float64(simW) - panelW - 12
+	y := float64(simH) - panelH - 12
+
+	vector.FillRect(dst, float32(x), float32(y), float32(panelW), float32(panelH), color.RGBA{0, 0, 0, 180}, false)
+	vector.StrokeRect(dst, float32(x), float32(y), float32(panelW), float32(panelH), 1, colSep, false)
+
+	tx, ty := x+pad, y+pad
+	modeName := map[fieldMode]string{
+		modeSpeed:     "AIRFLOW SPEED",
+		modeVorticity: "SWIRLING MOTION",
+		modePressure:  "AIR PRESSURE",
+	}[g.mode]
+	drawString(dst, modeName, tx, ty, colHeader)
+	ty += lineH + sectionGap
+
+	var barTitle, barLo, barHi string
+	switch g.mode {
+	case modeVorticity:
+		barTitle, barLo, barHi = "Color shows spin direction:", "clockwise", "counter-clockwise"
+	case modePressure:
+		barTitle, barLo, barHi = "Color shows air pressure:", "suction (pulls)", "high (pushes)"
+	default:
+		barTitle, barLo, barHi = "Color shows airflow speed:", "slow", "fast"
+	}
+	drawString(dst, barTitle, tx, ty, colLabel)
+	barY := ty + lineH
+	if g.labelBarImg == nil || g.labelBarMode != g.mode {
+		g.rebuildLabelBarImage(barW, barH)
+	}
+	op := &ebiten.DrawImageOptions{}
+	op.GeoM.Translate(tx, barY)
+	dst.DrawImage(g.labelBarImg, op)
+	vector.StrokeRect(dst, float32(tx), float32(barY), float32(barW), float32(barH), 1, colSep, false)
+	drawString(dst, barLo, tx, barY+barH+4, colLabel)
+	drawString(dst, barHi, tx+barW-float64(len(barHi))*charW, barY+barH+4, colLabel)
+	ty = barY + barH + 4 + lineH + sectionGap
+
+	// Lattice units carry no real physical scale (see lbm's package doc), so
+	// this maps the same fraction of the solver's stable speed range onto a
+	// plausible desktop-exhibit knots range instead of a fabricated SI value.
+	knots := 25 * g.u0 / spdMax
+	drawString(dst, fmt.Sprintf("Wind speed: %.0f kn", knots), tx, ty, colValue)
+	ty += lineH
+	drawString(dst, fmt.Sprintf("Angle of attack: %+.0f°", g.alphaDeg), tx, ty, colValue)
+	ty += lineH
+	if hasCtrl {
+		drawString(dst, fmt.Sprintf("Control surface: %+.0f°", g.controlDeg), tx, ty, colValue)
+		ty += lineH
+	}
+	ty += sectionGap
+	drawString(dst, fmt.Sprintf("Lift: %+.2f   Drag: %+.3f", g.clCur, g.cdCur), tx, ty, colValue)
+}
+
 // drawBottomPanel lists the keyboard controls and the draggable sliders.
 func (g *Game) drawBottomPanel(screen *ebiten.Image) {
 	top := float64(simH)
@@ -1809,6 +1936,7 @@ func (g *Game) drawBottomPanel(screen *ebiten.Image) {
 		{"S", "streamlines"},
 		{"G", "glow / bloom"},
 		{"P", "particles"},
+		{"H", "legend"},
 		{"[  ]", "inlet speed"},
 		{"Space", "pause / resume"},
 		{"N", "step (paused)"},

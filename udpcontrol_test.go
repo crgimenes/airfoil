@@ -89,6 +89,17 @@ func TestApplyControlMessageTogglesAndMode(t *testing.T) {
 		t.Error("PARTICLES 1 should turn particles on")
 	}
 
+	g.applyControlMessage("LABEL 1")
+	g.drainPending()
+	if !g.showLabel {
+		t.Error("LABEL 1 should turn the legend on")
+	}
+	g.applyControlMessage("LABEL 0")
+	g.drainPending()
+	if g.showLabel {
+		t.Error("LABEL 0 should turn the legend off")
+	}
+
 	g.applyControlMessage("MODE pressure")
 	g.drainPending()
 	if g.mode != modePressure {
