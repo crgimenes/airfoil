@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-# build-windows.sh builds the official Windows release binaries (386, amd64,
-# arm64) and refuses to produce an artifact whose dependencies are not the
-# pinned, hash-verified module versions.
+# build-windows.sh builds the official Windows release binaries (amd64, arm64)
+# and refuses to produce an artifact whose dependencies are not the pinned,
+# hash-verified module versions.
 #
 # It exists because of v0.1.9: the release ran from the repo directory, the
 # local go.work silently resolved glaze/minigui/native to the sibling
@@ -14,7 +14,7 @@ set -euo pipefail
 # with `go version -m` before it is accepted.
 #
 # Usage:
-#   build-windows.sh [outdir]        build the three .exe into outdir (default dist)
+#   build-windows.sh [outdir]        build the .exe into outdir (default dist)
 #   build-windows.sh verify FILE...  only run the dependency gate on FILEs
 #
 # release.sh calls both forms: the first for the Windows targets, the second
@@ -57,7 +57,9 @@ OUT_DIR="${1:-dist}"
 BINARY_NAME=$(basename "$(pwd)")
 mkdir -p "$OUT_DIR"
 
-for arch in 386 amd64 arm64; do
+# 64-bit only: old platforms are not supported here, and a 32-bit target has
+# to be built, signed, uploaded and answered for on every release forever.
+for arch in amd64 arm64; do
   out="$OUT_DIR/${BINARY_NAME}-windows-${arch}.exe"
   echo "Building windows/${arch}: $(basename "$out")"
   env GOWORK=off GOOS=windows GOARCH="$arch" CGO_ENABLED=0 \

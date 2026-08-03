@@ -15,6 +15,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # NO CGO, on any platform, Linux included. Ebitengine is pure Go there on
+    # the v2.10 alpha this project pins — which is exactly why it pins that
+    # alpha. Setting it at the job level is the enforcement: a dependency that
+    # quietly needed a C toolchain fails here instead of on somebody's machine.
+    env:
+      CGO_ENABLED: "0"
 
     steps:
       - name: Checkout code
@@ -25,20 +31,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libc6-dev \
-            libgl1-mesa-dev \
-            libxcursor-dev \
-            libxi-dev \
-            libxinerama-dev \
-            libxrandr-dev \
-            libxxf86vm-dev \
-            pkg-config
-
       - name: Test
         run: go test ./...
 
@@ -48,8 +40,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - goos: windows
-            goarch: "386"
           - goos: windows
             goarch: amd64
           - goos: windows

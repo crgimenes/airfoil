@@ -35,7 +35,6 @@ Grab a prebuilt binary from the
 | --- | --- |
 | macOS (Intel or Apple Silicon) | `kutta-darwin-universal.zip` |
 | Windows (64-bit, most common) | `kutta-windows-amd64.exe` |
-| Windows (older 32-bit) | `kutta-windows-386.exe` |
 | Windows (ARM) | `kutta-windows-arm64.exe` |
 | Linux (Intel/AMD 64-bit) | `kutta-linux-amd64.gz` |
 | Linux (ARM 64-bit) | `kutta-linux-arm64.gz` |
