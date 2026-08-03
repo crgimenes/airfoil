@@ -12,4 +12,7 @@ package main
 // The trade is that the flow evolves slower in wall-clock time than on the
 // desktop. Smooth and slow reads better than fast and juddering, and the
 // physics per step is identical either way.
-const substeps = 1
+//
+// It's a var, not a const, so the same -substeps flag in main.go that
+// overrides the native default can override this one too.
+var substeps = 1
