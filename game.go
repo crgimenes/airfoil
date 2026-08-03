@@ -5,11 +5,13 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/crgimenes/glaze/menu"
 	ui "github.com/crgimenes/minigui"
@@ -206,6 +208,21 @@ type Game struct {
 	// changes -- was pure waste. Rebuilt only when labelBarMode != mode.
 	labelBarImg  *ebiten.Image
 	labelBarMode fieldMode
+	// Demo mode: after demoIdleSec of no real change to speed/AoA/control (via
+	// setSpeed/setAlpha/setControl -- the same choke points sliders, keyboard
+	// and UDP already go through), the sim gently wanders those three on its
+	// own until any real input arrives again. demoIdleSec <= 0 disables the
+	// feature entirely. applyingDemo distinguishes the demo driver's own calls
+	// to those setters from real input, so it doesn't reset its own idle timer
+	// or immediately cancel itself.
+	demoIdleSec     float64
+	demoActive      bool
+	applyingDemo    bool
+	lastUserInput   time.Time
+	demoNextRetime  time.Time
+	demoTargetSpeed float64
+	demoTargetAoa   float64
+	demoTargetCtrl  float64
 
 	// startFullscreen defers the -fullscreen flag until a few frames have been
 	// drawn: entering fullscreen during startup blanks the screen on macOS (it
@@ -346,6 +363,7 @@ func NewGame() *Game {
 		showParticles: true,
 		nacaCode:      profiles[0],
 		nacaInput:     profiles[0],
+		lastUserInput: time.Now(),
 	}
 	g.sim = lbm.New(gridW, gridH, tau, g.u0)
 	g.smoke = viz.NewParticles(nParticles, gridW, gridH, 1)
@@ -524,10 +542,58 @@ func (g *Game) controlObject() *scene.Object {
 // re-applying immediately so it moves even while the timeline is paused.
 func (g *Game) setControl(deg float64) {
 	g.controlDeg = math.Max(-controlLimit, math.Min(controlLimit, deg))
+	g.noteUserInput()
 	if g.scn == nil {
 		return
 	}
 	g.sim.UpdateSolid(g.sceneMask(g.scn.LoopTime(g.animTime)))
+}
+
+// noteUserInput marks real user activity on speed/AoA/control -- called from
+// their shared setters, so it sees every caller (sliders, keyboard, UDP)
+// automatically. It's a no-op while the demo driver itself is the one calling
+// those setters, so demo mode doesn't reset its own idle clock or instantly
+// cancel itself; any real caller immediately drops out of demo mode.
+func (g *Game) noteUserInput() {
+	if g.applyingDemo {
+		return
+	}
+	g.lastUserInput = time.Now()
+	g.demoActive = false
+}
+
+// updateDemo drives the idle-triggered wander: once demoIdleSec elapses with
+// no real input, it picks a new random (but valid) target for speed/AoA/
+// control every few seconds and eases the live value a fraction of the way
+// there each tick, so the motion reads as a gentle drift rather than a jump.
+// Any real input (via noteUserInput, called from the same setters this uses)
+// cancels demoActive immediately, handing control back.
+func (g *Game) updateDemo() {
+	if g.demoIdleSec <= 0 {
+		return
+	}
+	if !g.demoActive {
+		idleFor := time.Since(g.lastUserInput)
+		if idleFor < time.Duration(g.demoIdleSec*float64(time.Second)) {
+			return
+		}
+		g.demoActive = true
+		g.demoNextRetime = time.Time{} // force an immediate retarget below
+	}
+
+	if time.Now().After(g.demoNextRetime) {
+		g.demoTargetSpeed = spdMin + rand.Float64()*(spdMax-spdMin)
+		g.demoTargetAoa = -20 + rand.Float64()*40
+		g.demoTargetCtrl = -controlLimit + rand.Float64()*(2*controlLimit)
+		g.demoNextRetime = time.Now().Add(time.Duration(5+rand.IntN(4)) * time.Second)
+	}
+
+	const drift = 0.01 // fraction of the remaining distance to target, per tick
+	g.applyingDemo = true
+	g.setSpeed(g.u0 + (g.demoTargetSpeed-g.u0)*drift)
+	g.setAlpha(g.alphaDeg + (g.demoTargetAoa-g.alphaDeg)*drift)
+	g.setControl(g.controlDeg + (g.demoTargetCtrl-g.controlDeg)*drift)
+	g.applyingDemo = false
 }
 
 // Update steps the simulation and handles input.
@@ -761,6 +827,7 @@ func (g *Game) Update() error {
 		return nil
 	}
 	g.handleInput()
+	g.updateDemo()
 	if g.paused {
 		return nil
 	}
@@ -1189,6 +1256,7 @@ func (g *Game) setAlpha(deg float64) {
 		a += 360
 	}
 	g.alphaDeg = a
+	g.noteUserInput()
 	if g.scn == nil {
 		g.applyBody(false)
 		return
@@ -1211,6 +1279,7 @@ func (g *Game) setSpeed(u float64) {
 	g.simErr = ""
 	g.u0 = math.Max(0.02, math.Min(0.15, u))
 	g.sim.SetInletSpeed(g.u0)
+	g.noteUserInput()
 }
 
 // Draw paints the clipped simulation viewport and the two information panels —

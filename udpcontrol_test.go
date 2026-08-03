@@ -113,4 +113,19 @@ func TestApplyControlMessageTogglesAndMode(t *testing.T) {
 	if g.mode != modePressure {
 		t.Errorf("invalid MODE value should be ignored; mode = %v, want unchanged modePressure", g.mode)
 	}
+
+	g.applyControlMessage("DEMO 45")
+	g.drainPending()
+	if g.demoIdleSec != 45 {
+		t.Errorf("DEMO 45: demoIdleSec = %v, want 45", g.demoIdleSec)
+	}
+	g.demoActive = true // simulate an in-progress wander
+	g.applyControlMessage("DEMO 0")
+	g.drainPending()
+	if g.demoIdleSec != 0 {
+		t.Errorf("DEMO 0: demoIdleSec = %v, want 0", g.demoIdleSec)
+	}
+	if g.demoActive {
+		t.Error("DEMO 0 should hand control back immediately, not freeze mid-wander")
+	}
 }
