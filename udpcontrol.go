@@ -68,7 +68,9 @@ func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
 			// The read loop only returns on a real socket error; rebinding
 			// below is also the recovery path for that, not just the timer.
 		case <-time.After(udpRebindInterval):
-			conn.Close()
+			// Closing is how the read loop is unblocked, so a close error has
+			// nowhere useful to go: the socket is being replaced regardless.
+			_ = conn.Close()
 			<-done
 		}
 

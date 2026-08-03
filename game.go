@@ -541,6 +541,14 @@ func (g *Game) controlObject() *scene.Object {
 // setControl changes the live control-surface deflection in place (no reset),
 // re-applying immediately so it moves even while the timeline is paused.
 func (g *Game) setControl(deg float64) {
+	// Reject non-finite input here, the way setAlpha and setSpeed already do:
+	// math.Max/math.Min propagate a NaN instead of clamping it, and a NaN
+	// deflection rotates the control surface out of the rasterized mask, so a
+	// stray "CTRL nan" over the network would delete part of the body with no
+	// UI path back. This is the choke point every caller shares.
+	if math.IsNaN(deg) || math.IsInf(deg, 0) {
+		return
+	}
 	g.controlDeg = math.Max(-controlLimit, math.Min(controlLimit, deg))
 	g.noteUserInput()
 	if g.scn == nil {
