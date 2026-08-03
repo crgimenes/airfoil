@@ -590,10 +590,12 @@ func (g *Game) updateDemo() {
 	}
 
 	if time.Now().After(g.demoNextRetime) {
-		g.demoTargetSpeed = spdMin + rand.Float64()*(spdMax-spdMin)
-		g.demoTargetAoa = -20 + rand.Float64()*40
-		g.demoTargetCtrl = -controlLimit + rand.Float64()*(2*controlLimit)
-		g.demoNextRetime = time.Now().Add(time.Duration(5+rand.IntN(4)) * time.Second)
+		// The randomness here picks where an unattended display drifts next;
+		// the only property that matters is that it doesn't look like a loop.
+		g.demoTargetSpeed = spdMin + rand.Float64()*(spdMax-spdMin)                    // #nosec G404 -- cosmetic
+		g.demoTargetAoa = -20 + rand.Float64()*40                                      // #nosec G404 -- cosmetic
+		g.demoTargetCtrl = -controlLimit + rand.Float64()*(2*controlLimit)             // #nosec G404 -- cosmetic
+		g.demoNextRetime = time.Now().Add(time.Duration(5+rand.IntN(4)) * time.Second) // #nosec G404 -- cosmetic
 	}
 
 	const drift = 0.01 // fraction of the remaining distance to target, per tick

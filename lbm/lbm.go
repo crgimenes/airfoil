@@ -86,7 +86,11 @@ type Solver struct {
 	// scene rebuilds every frame, so the scan count matters.
 	faceBins [4][]face
 
-	// rings is the fused kernel's per-worker row window; see fused.go.
+	// rings is the fused kernel's per-worker row window; see fused.go. The
+	// browser build steps through the separate phases instead (step_js.go), so
+	// there the field stays nil and unread -- a few words of struct against
+	// splitting the type in two across build tags.
+	//nolint:unused // only the native build's fused kernel fills this
 	rings [][]float32
 }
 
