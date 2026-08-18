@@ -1991,10 +1991,13 @@ func (g *Game) drawLabel(dst *ebiten.Image) {
 	knots := 25 * g.u0 / spdMax
 	drawString(dst, fmt.Sprintf("Wind speed: %.0f kn", knots), tx, ty, colValue)
 	ty += lineH
-	drawString(dst, fmt.Sprintf("Angle of attack: %+.0f°", g.alphaDeg), tx, ty, colValue)
+	// "deg" not "°": basicfont.Face7x13 (this on-screen text's fixed-width
+	// bitmap font) only covers basic ASCII, so the degree sign rendered as
+	// a "?" tofu glyph on the actual display.
+	drawString(dst, fmt.Sprintf("Angle of attack: %+.0f deg", g.alphaDeg), tx, ty, colValue)
 	ty += lineH
 	if hasCtrl {
-		drawString(dst, fmt.Sprintf("Control surface: %+.0f°", g.controlDeg), tx, ty, colValue)
+		drawString(dst, fmt.Sprintf("Control surface: %+.0f deg", g.controlDeg), tx, ty, colValue)
 		ty += lineH
 	}
 	ty += sectionGap
