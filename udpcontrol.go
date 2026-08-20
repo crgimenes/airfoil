@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
@@ -54,16 +54,13 @@ func (g *Game) startUDPControl(addr string) error {
 // membership (there is none), so it only ever runs the plain read loop.
 func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
 	if !isMulticastAddr(addr) {
-		g.udpControlLoop(conn, nil)
+		g.udpControlLoop(conn)
 		return
 	}
 	for {
 		done := make(chan struct{})
-		// Set just before a deliberate close, so the read loop can tell the
-		// rebind below apart from a socket that failed on its own.
-		var rebinding atomic.Bool
 		go func(c net.PacketConn) {
-			g.udpControlLoop(c, &rebinding)
+			g.udpControlLoop(c)
 			close(done)
 		}(conn)
 
@@ -74,7 +71,6 @@ func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
 		case <-time.After(udpRebindInterval):
 			// Closing is how the read loop is unblocked, so a close error has
 			// nowhere useful to go: the socket is being replaced regardless.
-			rebinding.Store(true)
 			_ = conn.Close()
 			<-done
 		}
@@ -117,37 +113,70 @@ func listenUDPControl(addr string) (net.PacketConn, error) {
 	return net.ListenPacket("udp", addr)
 }
 
-// outboundInterface finds the network interface the OS would use to reach
-// the public internet, by opening a UDP "connection" (Dial never actually
-// sends a packet, so this needs no real connectivity, just a routing table
-// with a default route) and matching its local IP back to one of
-// net.Interfaces(). This is what listenUDPControl passes to
-// ListenMulticastUDP instead of nil.
+// outboundInterface picks the interface to join the multicast group on,
+// which listenUDPControl passes to ListenMulticastUDP instead of nil.
+//
+// First choice is the interface the routing table would leave the machine
+// through, matched by local address. An exhibit network need not have a
+// default route to ask about at all -- a Pi wired straight to the sender,
+// static address, no gateway -- so the fallback is the first interface that
+// is up, not loopback and multicast-capable, which on such a machine is the
+// only interface there is.
 func outboundInterface() (*net.Interface, error) {
-	conn, err := net.Dial("udp4", "8.8.8.8:80")
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	localIP := conn.LocalAddr().(*net.UDPAddr).IP
+	localIP := routedLocalIP()
 
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
 	}
+
+	var fallback *net.Interface
 	for i := range ifaces {
-		addrs, err := ifaces[i].Addrs()
+		ifi := &ifaces[i]
+		const want = net.FlagUp | net.FlagMulticast
+		if ifi.Flags&want != want || ifi.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if fallback == nil {
+			fallback = ifi
+		}
+		if localIP == nil {
+			continue
+		}
+		addrs, err := ifi.Addrs()
 		if err != nil {
 			continue
 		}
 		for _, a := range addrs {
 			ipnet, ok := a.(*net.IPNet)
 			if ok && ipnet.IP.Equal(localIP) {
-				return &ifaces[i], nil
+				return ifi, nil
 			}
 		}
 	}
-	return nil, fmt.Errorf("no interface found for local IP %v", localIP)
+
+	if fallback == nil {
+		return nil, errors.New("no interface is up, non-loopback and multicast-capable")
+	}
+	return fallback, nil
+}
+
+// routedLocalIP reports the local address the routing table would send an
+// outbound packet from, or nil when there is no route to ask about. Dial on
+// UDP sends nothing, so this is a routing-table lookup and needs no actual
+// connectivity; the address dialed only has to be off-link.
+func routedLocalIP() net.IP {
+	conn, err := net.Dial("udp4", "8.8.8.8:80")
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = conn.Close() }()
+
+	udp, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return nil
+	}
+	return udp.IP
 }
 
 // isMulticastAddr reports whether addr's host is a multicast IP (224.0.0.0/4
@@ -165,20 +194,17 @@ func isMulticastAddr(addr string) bool {
 // udpControlLoop reads packets until the socket errors (typically only on
 // shutdown) or the process exits; each packet may hold one or more
 // newline-separated messages.
-//
-// rebinding, when non-nil, reports that the caller is about to close conn on
-// purpose (the multicast re-bind in udpControlSupervisor). The close is what
-// unblocks ReadFrom, so that path always ends in an error, and logging it
-// would report kutta's own routine maintenance as a fault: a multicast
-// listener printed "use of closed network connection" every udpRebindInterval
-// for as long as it ran. Unicast callers pass nil -- they never close early,
-// so any error there is real.
-func (g *Game) udpControlLoop(conn net.PacketConn, rebinding *atomic.Bool) {
+func (g *Game) udpControlLoop(conn net.PacketConn) {
 	buf := make([]byte, 512)
 	for {
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {
-			if rebinding == nil || !rebinding.Load() {
+			// The multicast re-bind in udpControlSupervisor closes the socket
+			// on purpose, and that close is what unblocks ReadFrom, so this
+			// path runs every udpRebindInterval by design; logging it reported
+			// kutta's own maintenance as a fault. Only a close yields
+			// net.ErrClosed, so a socket that failed on its own still logs.
+			if !errors.Is(err, net.ErrClosed) {
 				log.Printf("kutta: UDP control: %v", err)
 			}
 			return

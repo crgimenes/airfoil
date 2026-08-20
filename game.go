@@ -40,6 +40,10 @@ const (
 	spdMin   = 0.02 // inlet speed range where the solver stays stable
 	spdMax   = 0.15
 
+	// defaultMaxDisplayKn is what the legend reads at spdMax with no -max-kn:
+	// a plausible desktop-exhibit figure, not a calibrated one.
+	defaultMaxDisplayKn = 25
+
 	tracerSpeed = 5.0  // visual advection multiplier for smoke tracers
 	nParticles  = 3000 // dense enough to fill the whole tunnel, not just the centre
 
@@ -360,7 +364,7 @@ func NewGame() *Game {
 	g := &Game{
 		alphaDeg:      4,
 		u0:            defaultU,
-		maxDisplayKn:  25,
+		maxDisplayKn:  defaultMaxDisplayKn,
 		glow:          true,
 		showParticles: true,
 		nacaCode:      profiles[0],

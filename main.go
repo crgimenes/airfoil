@@ -6,6 +6,7 @@ package main
 import (
 	"flag"
 	"log"
+	"math"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
@@ -31,7 +32,7 @@ func main() {
 	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
 	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
 	substepsFlag := flag.Int("substeps", substeps, "solver steps per displayed frame; lower this on slower hardware to trade physical accuracy for CPU headroom")
-	maxKn := flag.Float64("max-kn", 25, "wind speed, in knots, the legend's \"Wind speed\" line reads at full slider/knob speed -- calibrate this to whatever real aircraft the exhibit demonstrates")
+	maxKn := flag.Float64("max-kn", defaultMaxDisplayKn, "wind speed, in knots, the legend's \"Wind speed\" line reads at full slider/knob speed -- calibrate this to whatever real aircraft the exhibit demonstrates")
 	flag.Parse()
 
 	if *substepsFlag < 1 {
@@ -66,7 +67,14 @@ func main() {
 	g.showLabel = *label
 	g.demoIdleSec = *demo
 	g.streamlines = *streamlines
-	g.maxDisplayKn = *maxKn
+	// NewGame already carries the default, so an unusable value keeps it:
+	// this only calibrates a display string and must not stop an exhibit
+	// from booting.
+	if math.IsNaN(*maxKn) || math.IsInf(*maxKn, 0) || *maxKn <= 0 {
+		log.Printf("kutta: -max-kn %v: want a finite speed above 0; keeping %d", *maxKn, defaultMaxDisplayKn)
+	} else {
+		g.maxDisplayKn = *maxKn
+	}
 	if *mode != "" {
 		fm, ok := parseFieldMode(*mode)
 		if !ok {
