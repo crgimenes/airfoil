@@ -31,6 +31,7 @@ func main() {
 	fullscreen := flag.Bool("fullscreen", false, "start in full screen")
 	hideControls := flag.Bool("hidecontrols", false, "hide every panel and control, showing only the flow image (kiosk mode)")
 	substepsFlag := flag.Int("substeps", substeps, "solver steps per displayed frame; lower this on slower hardware to trade physical accuracy for CPU headroom")
+	maxKn := flag.Float64("max-kn", 25, "wind speed, in knots, the legend's \"Wind speed\" line reads at full slider/knob speed -- calibrate this to whatever real aircraft the exhibit demonstrates")
 	flag.Parse()
 
 	if *substepsFlag < 1 {
@@ -65,6 +66,7 @@ func main() {
 	g.showLabel = *label
 	g.demoIdleSec = *demo
 	g.streamlines = *streamlines
+	g.maxDisplayKn = *maxKn
 	if *mode != "" {
 		fm, ok := parseFieldMode(*mode)
 		if !ok {
