@@ -1127,8 +1127,8 @@ func (g *Game) autoSmoothSelected() {
 func (g *Game) selectAt(sx, sy float64) {
 	wx, wy := g.cam.screenToWorld(sx, sy)
 	g.selObj = -1
-	for i := len(g.scn.Objects) - 1; i >= 0; i-- {
-		if pointInPoly(wx, wy, g.activeOutline(g.scn.Objects[i])) {
+	for i, v := range slices.Backward(g.scn.Objects) {
+		if pointInPoly(wx, wy, g.activeOutline(v)) {
 			g.selObj = i
 			return
 		}

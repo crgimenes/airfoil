@@ -8,6 +8,7 @@ package foil
 import (
 	"fmt"
 	"math"
+	"slices"
 )
 
 // Point is a 2D coordinate in either chord-normalized or grid space.
@@ -96,8 +97,8 @@ func buildOutline(n int, t float64, camberFn func(x float64) (yc, dyc float64)) 
 	}
 	// Walk the upper surface from TE to LE, then the lower from LE to TE.
 	outline := make([]Point, 0, 2*(n+1))
-	for j := len(upper) - 1; j >= 0; j-- {
-		outline = append(outline, upper[j])
+	for _, u := range slices.Backward(upper) {
+		outline = append(outline, u)
 	}
 	for j := 1; j < len(lower); j++ {
 		outline = append(outline, lower[j])
