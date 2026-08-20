@@ -187,8 +187,10 @@ type Game struct {
 	controlDeg    float64 // live deflection of the scene's Control object, in degrees
 	mode          fieldMode
 	paused        bool
-	streamlines   bool // overlay integrated streamlines
-	glow          bool // additive bloom on the smoke
+	streamlines     bool        // overlay integrated streamlines
+	streamlinePath  vector.Path // cached integration, rebuilt every streamlineEvery frames
+	streamlineFrame int         // Draw() calls since the last streamline rebuild
+	glow            bool // additive bloom on the smoke
 	showParticles bool // draw the smoke tracers at all; off isolates streamlines with a clean background
 	// clean hides every panel/control, drawing only the flow image -- exactly
 	// what -hidecontrols has always meant, on its own. kiosk adds the rest of
@@ -238,8 +240,9 @@ type Game struct {
 
 	outline []foil.Point // chord-normalized profile, regenerated on profile change
 
-	fieldImg *ebiten.Image // gridW×gridH scalar field
-	trailImg *ebiten.Image // sim-sized accumulating smoke layer
+	fieldImg      *ebiten.Image // gridW×gridH scalar field
+	streamlineImg *ebiten.Image // sim-sized, re-stroked only when streamlinePath is -- see drawStreamlines
+	trailImg      *ebiten.Image // sim-sized accumulating smoke layer
 	dotImg   *ebiten.Image // small tracer sprite
 	fadeImg  *ebiten.Image // 1×1 translucent black for trail decay
 	pixbuf   []byte        // reusable RGBA buffer for the field
@@ -375,6 +378,7 @@ func NewGame() *Game {
 	g.smoke = viz.NewParticles(nParticles, gridW, gridH, 1)
 
 	g.fieldImg = ebiten.NewImage(gridW, gridH)
+	g.streamlineImg = ebiten.NewImage(simW, simH)
 	g.trailImg = ebiten.NewImage(simW, simH)
 	g.dotImg = ebiten.NewImage(2, 2)
 	g.dotImg.Fill(color.White)
@@ -1516,11 +1520,51 @@ func (g *Game) drawSmoke(dst *ebiten.Image) {
 	}
 }
 
+// streamlineEvery is how many Draw() calls elapse between streamline
+// re-integrations. The integration is CPU work proportional to nLines *
+// maxSteps that has to run on the main thread every time it happens, so on
+// slower hardware doing it every frame competes with everything else Draw
+// does; the flow only changes gradually, so re-running it a few times a
+// second instead of 60 times a second is not visible but is much cheaper.
+const streamlineEvery = 3
+
 // drawStreamlines overlays instantaneous streamlines, integrated from a column
 // of seeds near the inlet by stepping a fixed arc length along the local
 // velocity (RK2 midpoint). The whole set is one batched path, so it is a single
-// draw call regardless of length.
+// draw call regardless of length. The integration itself only reruns every
+// streamlineEvery frames (see streamlinePath); every other frame just redraws
+// the cached path.
+//
+// AntiAlias true roughly doubles the cost of stroking on the Pi's graphics
+// driver (Mac's Metal backend barely notices it), measured directly (not just
+// theorized) at ~2x with the path drawn straight to screen resolution, and
+// separately measured to cost about the same even stroked into a small
+// offscreen image and upscaled -- the cost is CPU-side tessellation of the
+// path's segments (up to nLines * maxSteps of them), not the size of the
+// destination image, so a smaller destination doesn't dodge it. What does
+// help: that tessellation only has to happen when the path itself changes,
+// i.e. once every streamlineEvery frames, exactly like the integration below
+// -- caching the *stroked* image, not just the path, means AA is only ever
+// paid for on the frame that already recomputes the path, with zero added
+// staleness on the frames in between (the shape wasn't changing there
+// either way).
 func (g *Game) drawStreamlines(dst *ebiten.Image) {
+	if g.streamlineFrame%streamlineEvery == 0 {
+		g.streamlinePath = g.integrateStreamlines()
+		g.streamlineImg.Clear()
+		op := &vector.StrokeOptions{Width: 1, LineJoin: vector.LineJoinRound}
+		dop := &vector.DrawPathOptions{AntiAlias: true}
+		dop.ColorScale.ScaleWithColor(color.RGBA{0xde, 0xe8, 0xff, 0xc0})
+		vector.StrokePath(g.streamlineImg, &g.streamlinePath, op, dop)
+	}
+	g.streamlineFrame++
+
+	dst.DrawImage(g.streamlineImg, nil)
+}
+
+// integrateStreamlines runs the actual RK2 particle integration; see
+// drawStreamlines for why this is not called every frame.
+func (g *Game) integrateStreamlines() vector.Path {
 	const nLines = 28
 	const maxSteps = 400
 	const ds = 1.5 // grid cells advanced per step
@@ -1555,10 +1599,7 @@ func (g *Game) drawStreamlines(dst *ebiten.Image) {
 			path.LineTo(lx, ly)
 		}
 	}
-	op := &vector.StrokeOptions{Width: 1, LineJoin: vector.LineJoinRound}
-	dop := &vector.DrawPathOptions{AntiAlias: true}
-	dop.ColorScale.ScaleWithColor(color.RGBA{0xde, 0xe8, 0xff, 0xc0})
-	vector.StrokePath(dst, &path, op, dop)
+	return path
 }
 
 // gridToScreen maps a grid-space point (y up) to viewport pixels (y down).
