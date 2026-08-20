@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -53,13 +54,16 @@ func (g *Game) startUDPControl(addr string) error {
 // membership (there is none), so it only ever runs the plain read loop.
 func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
 	if !isMulticastAddr(addr) {
-		g.udpControlLoop(conn)
+		g.udpControlLoop(conn, nil)
 		return
 	}
 	for {
 		done := make(chan struct{})
+		// Set just before a deliberate close, so the read loop can tell the
+		// rebind below apart from a socket that failed on its own.
+		var rebinding atomic.Bool
 		go func(c net.PacketConn) {
-			g.udpControlLoop(c)
+			g.udpControlLoop(c, &rebinding)
 			close(done)
 		}(conn)
 
@@ -70,6 +74,7 @@ func (g *Game) udpControlSupervisor(addr string, conn net.PacketConn) {
 		case <-time.After(udpRebindInterval):
 			// Closing is how the read loop is unblocked, so a close error has
 			// nowhere useful to go: the socket is being replaced regardless.
+			rebinding.Store(true)
 			_ = conn.Close()
 			<-done
 		}
@@ -160,12 +165,22 @@ func isMulticastAddr(addr string) bool {
 // udpControlLoop reads packets until the socket errors (typically only on
 // shutdown) or the process exits; each packet may hold one or more
 // newline-separated messages.
-func (g *Game) udpControlLoop(conn net.PacketConn) {
+//
+// rebinding, when non-nil, reports that the caller is about to close conn on
+// purpose (the multicast re-bind in udpControlSupervisor). The close is what
+// unblocks ReadFrom, so that path always ends in an error, and logging it
+// would report kutta's own routine maintenance as a fault: a multicast
+// listener printed "use of closed network connection" every udpRebindInterval
+// for as long as it ran. Unicast callers pass nil -- they never close early,
+// so any error there is real.
+func (g *Game) udpControlLoop(conn net.PacketConn, rebinding *atomic.Bool) {
 	buf := make([]byte, 512)
 	for {
 		n, _, err := conn.ReadFrom(buf)
 		if err != nil {
-			log.Printf("kutta: UDP control: %v", err)
+			if rebinding == nil || !rebinding.Load() {
+				log.Printf("kutta: UDP control: %v", err)
+			}
 			return
 		}
 		sc := bufio.NewScanner(strings.NewReader(string(buf[:n])))
