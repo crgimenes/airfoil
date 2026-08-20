@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net"
 	"strconv"
@@ -93,9 +94,55 @@ func listenUDPControl(addr string) (net.PacketConn, error) {
 		if err != nil {
 			return nil, err
 		}
-		return net.ListenMulticastUDP("udp", nil, gaddr) // nil: let the OS pick the interface
+		// Passing nil here (letting the OS pick the interface -- Go's own
+		// docs call this "not recommended because the assignment depends on
+		// platform and network topology") joins the group somewhere on
+		// macOS, but silently joins nowhere at all on Linux: on a Pi with
+		// only wlan0 and loopback, kutta ran fine and never appeared in `ip
+		// maddr show wlan0`, so every packet the knob box sent was dropped
+		// before ever reaching udpControlLoop, with no error anywhere.
+		// Resolving the real outbound interface explicitly fixes that on
+		// both platforms.
+		ifi, err := outboundInterface()
+		if err != nil {
+			return nil, fmt.Errorf("multicast: could not determine network interface: %w", err)
+		}
+		return net.ListenMulticastUDP("udp", ifi, gaddr)
 	}
 	return net.ListenPacket("udp", addr)
+}
+
+// outboundInterface finds the network interface the OS would use to reach
+// the public internet, by opening a UDP "connection" (Dial never actually
+// sends a packet, so this needs no real connectivity, just a routing table
+// with a default route) and matching its local IP back to one of
+// net.Interfaces(). This is what listenUDPControl passes to
+// ListenMulticastUDP instead of nil.
+func outboundInterface() (*net.Interface, error) {
+	conn, err := net.Dial("udp4", "8.8.8.8:80")
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	localIP := conn.LocalAddr().(*net.UDPAddr).IP
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	for i := range ifaces {
+		addrs, err := ifaces[i].Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			ipnet, ok := a.(*net.IPNet)
+			if ok && ipnet.IP.Equal(localIP) {
+				return &ifaces[i], nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("no interface found for local IP %v", localIP)
 }
 
 // isMulticastAddr reports whether addr's host is a multicast IP (224.0.0.0/4
