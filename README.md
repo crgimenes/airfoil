@@ -25,6 +25,12 @@ The whole simulator runs as WebAssembly, with nothing to install. A browser tab
 cannot reach your files, so opening and saving `.afoil` scenes, importing SVG and
 the native menu are desktop only.
 
+## Get it from a store
+
+Kutta is on [itch.io](https://crgimenes.itch.io/kutta): play it in the
+browser, or grab the desktop builds on a pay-what-you-want page (zero
+included). Store releases and GitHub releases carry the same binaries.
+
 ## Download (no Go required)
 
 Grab a prebuilt binary from the
